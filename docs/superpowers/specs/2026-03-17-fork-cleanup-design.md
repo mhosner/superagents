@@ -35,13 +35,11 @@ Clean up the forked repository by removing files that are specific to the origin
 - `check_sdk_pin.yml` — SDK pin enforcement
 - `check_extras_sync.yml` — extras sync validation
 - `check_lockfiles.yml` — lockfile consistency checks
+- `auto-label-by-package.yml` — auto-labels issues by package area (depends on deleted issue templates)
 
-### `.github/scripts/` (supporting scripts for deleted workflows)
+### `.github/scripts/` directory
 
-- `aggregate_evals.py`
-- `check_extras_sync.py`
-- `check_version_equality.py`
-- `get_eval_models.py`
+Delete the entire `.github/scripts/` directory (all 4 scripts support deleted workflows).
 
 ## Files to Keep
 
