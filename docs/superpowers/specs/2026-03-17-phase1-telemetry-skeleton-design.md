@@ -172,3 +172,4 @@ trace: sdlc_workflow
 - Decorator sugar on top of context managers (add when repetition justifies it)
 - OTLP exporter configuration for production (straightforward via `init_telemetry(exporter=OTLPSpanExporter(...))`)
 - Custom `InMemorySpanExporter` wrapper with assertion helpers (YAGNI until test boilerplate warrants it)
+- Span links for distributed trace correlation (A2A handoffs across service boundaries will need links rather than parent-child relationships to connect traces between independent processes — not needed while handoffs are in-process)
