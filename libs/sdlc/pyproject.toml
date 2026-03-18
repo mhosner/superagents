@@ -1,0 +1,90 @@
+[project]
+name = "superagents-sdlc"
+version = "0.1.0"
+description = "SDLC integration — BMAD personas, autonomy policy, A2A handoffs"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+keywords = ["agents", "ai", "sdlc", "personas", "autonomy"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "superagents",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=1.0.0",
+    "pytest-socket>=0.7.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["superagents_sdlc*"]
+
+[tool.uv.sources]
+superagents = { path = "../superagents", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",  # Trailing comma — conflicts with formatter
+    "ISC001",  # Implicit string concat — conflicts with formatter
+    "FIX002",  # Line contains TODO
+    "TD002",   # Missing author in TODO
+    "TD003",   # Missing issue link in TODO
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+ignore-var-parameters = true
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true
+
+[tool.ruff.lint.isort]
+force-single-line = false
+combine-as-imports = true
+known-first-party = ["superagents_sdlc"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "ANN001",  # Missing type annotation for function argument
+    "ANN201",  # Missing return type annotation for public function
+    "ANN202",  # Missing return type annotation for private function
+    "ARG001",  # Unused function argument — fixtures used for side effects
+    "ARG002",  # Unused method argument — test doubles override signatures
+    "D1",      # Missing docstrings
+    "PLR2004", # Magic value used in comparison
+    "S101",    # Use of `assert`
+    "S",       # Security warnings
+    "SLF",     # Private member access
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
