@@ -1,5 +1,6 @@
 """Personas subpackage — SDLC persona facades."""
 
 from superagents_sdlc.personas.base import BasePersona
+from superagents_sdlc.personas.product_manager import ProductManagerPersona
 
-__all__ = ["BasePersona"]
+__all__ = ["BasePersona", "ProductManagerPersona"]
