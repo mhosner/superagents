@@ -1,125 +1,186 @@
-<div align="center">
-  <a href="https://docs.langchain.com/oss/python/deepagents/overview#deep-agents-overview">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset=".github/images/logo-light.svg">
-      <img alt="Deep Agents Logo" src=".github/images/logo-dark.svg" width="50%">
-    </picture>
-  </a>
-</div>
+# Superagents
 
-<div align="center">
-  <h3>The batteries-included agent harness.</h3>
-</div>
+An agentic software development lifecycle framework that maps AI agents to enterprise SDLC roles — so organizations can adopt agentic coding incrementally, with every persona accountable to a real human.
 
-<div align="center">
-  <a href="https://opensource.org/licenses/MIT" target="_blank"><img src="https://img.shields.io/pypi/l/deepagents" alt="PyPI - License"></a>
-  <a href="https://pypistats.org/packages/deepagents" target="_blank"><img src="https://img.shields.io/pepy/dt/deepagents" alt="PyPI - Downloads"></a>
-  <a href="https://pypi.org/project/deepagents/#history" target="_blank"><img src="https://img.shields.io/pypi/v/deepagents?label=%20" alt="Version"></a>
-  <a href="https://x.com/langchain" target="_blank"><img src="https://img.shields.io/twitter/url/https/twitter.com/langchain.svg?style=social&label=Follow%20%40LangChain" alt="Twitter / X"></a>
-</div>
+Built on [Deep Agents](https://github.com/langchain-ai/deepagents) (runtime), [Superpowers](https://github.com/obra/superpowers) (TDD methodology), and the [A2A Protocol](https://github.com/a2aproject/A2A) (agent communication).
 
-<br>
+## The problem
 
-Deep Agents is an agent harness. An opinionated, ready-to-run agent out of the box. Instead of wiring up prompts, tools, and context management yourself, you get a working agent immediately and customize what you need.
+Enterprise engineering organizations want to adopt agentic coding but face three blockers:
 
-**What's included:**
+1. **No governance model.** Existing frameworks don't map to the roles and approval chains that regulated industries require. When an AI agent writes code, who approved the spec it implemented? Who reviewed the architecture? Who signed off on the test plan?
 
-- **Planning** — `write_todos` for task breakdown and progress tracking
-- **Filesystem** — `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep` for reading and writing context
-- **Shell access** — `execute` for running commands (with sandboxing)
-- **Sub-agents** — `task` for delegating work with isolated context windows
-- **Smart defaults** — Prompts that teach the model how to use these tools effectively
-- **Context management** — Auto-summarization when conversations get long, large outputs saved to files
+2. **All-or-nothing adoption.** Most agentic tools assume full autonomy. Teams can't start with "agents draft, humans decide" and gradually increase autonomy as trust builds.
 
-> [!NOTE]
-> Looking for the JS/TS library? Check out [deepagents.js](https://github.com/langchain-ai/deepagentsjs).
+3. **No observability.** When agents produce artifacts across a multi-step workflow, there's no structured trace showing what happened, what was approved, and where things went wrong.
 
-## Quickstart
+## How Superagents solves this
+
+### SDLC personas with human owners
+
+Every agent maps to a traditional software development role. The human in that role owns the output.
+
+| Persona | Human Owner | What it does |
+|---------|-------------|-------------|
+| Product Manager | PM / Product Owner | Generates PRDs, prioritizes backlogs, writes user stories |
+| Architect | Tech Lead | Produces technical specs, evaluates tech debt |
+| Developer | Dev Team | Implements code via TDD with subagent-driven execution |
+| QA | QA Lead | Designs tests, analyzes results, validates quality |
+| Scrum Leader | Engineering Manager | Plans sprints, tracks workflows, orchestrates execution |
+| Stakeholder Proxy | Product Owner | Simulates stakeholder feedback, generates executive updates |
+
+A CTO can look at this system and see their org chart. That's the point.
+
+### Autonomy gradient
+
+Teams configure how much agents do versus how much humans do:
+
+**Level 1 — Assist.** Agents draft every artifact. Humans review and approve each one before the next phase begins. Implementation is human-led with agent pair programming.
+
+**Level 2 — Hybrid.** Agents own planning artifacts autonomously. Humans approve at phase boundaries (e.g., approve the story batch, then agents TDD each story). Human code review at story completion.
+
+**Level 3 — Autonomous.** Agents execute the full workflow. Humans approve at epic/sprint boundaries. Automated quality gates (test pass rate, review scores) determine proceed/block.
+
+The policy layer intercepts every agent-to-agent handoff and enforces the configured level. Moving from Level 1 to Level 2 is a config change, not a rewrite.
+
+### Telemetry from the ground up
+
+Every persona action, skill execution, handoff, and approval gate decision emits OpenTelemetry spans with structured attributes. This isn't bolted on — it's the first code in the project.
+
+```
+trace: sdlc_workflow
+  └── persona.product_manager
+       ├── skill.prd_generator
+       ├── approval_gate.prd_review
+       │    ├── approval.outcome = approved
+       │    └── gate_duration_ms = 1200
+       └── handoff.product_manager_to_architect
+            └── artifact.type = prd
+```
+
+This gives teams the data to justify moving from Level 1 to Level 2: "Here's the approval rejection rate. Here's the defect rate. Here's the time savings."
+
+### Superpowers TDD enforcement
+
+All implementation follows the [Superpowers](https://github.com/obra/superpowers) methodology — not as a suggestion, but as a mandatory workflow:
+
+1. **Brainstorm** before writing code.
+2. **Plan** in small tasks (2–5 minutes each).
+3. **RED-GREEN-REFACTOR** — write the failing test first. Always.
+4. **Subagent review** — two-stage (spec compliance, then code quality).
+5. **Finish cleanly** — verify tests pass, present merge options.
+
+### A2A protocol for agent communication
+
+Personas communicate via the [Agent2Agent Protocol](https://a2a-protocol.org/) — the open standard for agent interoperability. Each persona publishes an Agent Card describing its capabilities. Handoffs carry typed metadata (artifact path, context summary, trace ID). This means personas can eventually run as independent services, not just in-process — enabling multi-team, multi-framework agent collaboration.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Autonomy Policy Layer                     │
+│         (Level 1: assist → Level 2: hybrid → Level 3: auto) │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
+│  │    PM    │  │ Architect│  │   Dev    │  │    QA     │  │
+│  │ Persona  │  │ Persona  │  │ Persona  │  │  Persona  │  │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬─────┘  │
+│       │              │              │               │       │
+│  ┌────▼─────┐  ┌────▼─────┐  ┌────▼─────┐  ┌─────▼─────┐  │
+│  │ PM Skills│  │  Arch    │  │Superpwr  │  │ Layered   │  │
+│  │(ported   │  │  Skills  │  │TDD Cycle │  │ Testing   │  │
+│  │ from     │  │          │  │          │  │           │  │
+│  │MannaRay) │  │          │  │          │  │           │  │
+│  └──────────┘  └──────────┘  └──────────┘  └───────────┘  │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│              A2A Protocol (handoffs + discovery)             │
+├─────────────────────────────────────────────────────────────┤
+│              Deep Agents SDK (orchestration runtime)         │
+├─────────────────────────────────────────────────────────────┤
+│              OpenTelemetry (traces, spans, metrics)          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Project structure
+
+```
+superagents/
+├── libs/
+│   ├── superagents/          # SDK (extended from Deep Agents)
+│   │   └── superagents/
+│   │       └── telemetry/    # OpenTelemetry instrumentation
+│   ├── sdlc/                 # SDLC integration package
+│   │   └── src/superagents_sdlc/
+│   │       ├── personas/     # SDLC persona facades
+│   │       ├── skills/       # Ported PM, engineering, QA skills
+│   │       ├── policy/       # Autonomy policy engine
+│   │       ├── handoffs/     # A2A-based handoff implementation
+│   │       └── workflows/    # SDLC workflow definitions
+│   ├── cli/                  # Terminal UI (Textual)
+│   ├── harbor/               # Evaluation/benchmark framework
+│   └── partners/             # Integration packages
+├── .github/                  # CI/CD
+└── CLAUDE.md                 # Development standards
+```
+
+## Status
+
+This project is in early development. Current phase:
+
+- [x] Project architecture and CLAUDE.md
+- [x] Phase 1 design spec: Telemetry skeleton
+- [ ] Phase 1 implementation: `provider.py`, `spans.py`, 15 tests
+- [ ] Phase 2: BasePersona + Autonomy policy engine
+- [ ] Phase 3: Product Manager persona + ported Manna Ray skills
+- [ ] Phase 4: Additional personas (Architect, Developer, QA, Scrum Master)
+- [ ] Phase 5: End-to-end workflow (idea → tested code with full trace)
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.12+
+- [uv](https://github.com/astral-sh/uv)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with [Superpowers plugin](https://github.com/obra/superpowers)
+
+### Setup
 
 ```bash
-pip install deepagents
-# or
-uv add deepagents
+git clone https://github.com/YOUR_USERNAME/superagents.git
+cd superagents
+
+# Install the SDLC package and its dependencies
+cd libs/sdlc
+uv init --name superagents-sdlc --python ">=3.12"
+uv add opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
+uv add a2a-sdk pydantic
+uv add --group test pytest pytest-asyncio
+uv add --editable ../superagents
 ```
 
-```python
-from deepagents import create_deep_agent
-
-agent = create_deep_agent()
-result = agent.invoke({"messages": [{"role": "user", "content": "Research LangGraph and write a summary"}]})
-```
-
-The agent can plan, read/write files, and manage its own context. Add tools, customize prompts, or swap models as needed.
-
-> [!TIP]
-> For developing, debugging, and deploying AI agents and LLM applications, see [LangSmith](https://docs.langchain.com/langsmith/home).
-
-## Customization
-
-Add your own tools, swap models, customize prompts, configure sub-agents, and more. See the [documentation](https://docs.langchain.com/oss/python/deepagents/overview) for full details.
-
-```python
-from langchain.chat_models import init_chat_model
-
-agent = create_deep_agent(
-    model=init_chat_model("openai:gpt-4o"),
-    tools=[my_custom_tool],
-    system_prompt="You are a research assistant.",
-)
-```
-
-MCP is supported via [`langchain-mcp-adapters`](https://github.com/langchain-ai/langchain-mcp-adapters).
-
-## Deep Agents CLI
-
-<p align="center">
-  <img src="libs/cli/images/cli.png" alt="Deep Agents CLI" width="600"/>
-</p>
+### Development
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/langchain-ai/deepagents/main/libs/cli/scripts/install.sh | bash
+make test       # Run unit tests (no network)
+make lint       # Lint with ruff
+make format     # Format with ruff
 ```
 
-Web search, remote sandboxes, persistent memory, human-in-the-loop approval, and more. See the [CLI README](libs/cli/) for the full feature set.
+All development follows the Superpowers TDD methodology. See [CLAUDE.md](CLAUDE.md) for standards.
 
-## LangGraph Native
+## Influences
 
-`create_deep_agent` returns a compiled [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) graph. Use it with streaming, Studio, checkpointers, or any LangGraph feature.
+Superagents wouldn't exist without these projects:
 
-## FAQ
+- **[Deep Agents](https://github.com/langchain-ai/deepagents)** — The SDK and agent harness this project is forked from.
+- **[Superpowers](https://github.com/obra/superpowers)** by Jesse Vincent — The TDD-first agentic development methodology that is the engineering backbone of this project.
+- **[BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD)** — The persona-driven agile AI framework that inspired the SDLC role mapping and adoption gradient.
+- **[Manna Ray](https://github.com/mhosner/manna_ray)** — The PM skills and workflow definitions being ported into the persona layer.
+- **[Strangler Fig Newton](https://github.com/mhosner/strangler_fig_newton)** — The legacy migration plugin for monolith-to-microservice decomposition.
+- **[A2A Protocol](https://github.com/a2aproject/A2A)** — The open standard for agent-to-agent communication.
 
-### Why should I use this?
+## License
 
-- **100% open source** — MIT licensed, fully extensible
-- **Provider agnostic** — Works with any Large Language Model that supports tool calling, including both frontier and open models
-- **Built on LangGraph** — Production-ready runtime with streaming, persistence, and checkpointing
-- **Batteries included** — Planning, file access, sub-agents, and context management work out of the box
-- **Get started in seconds** — `uv add deepagents` and you have a working agent
-- **Customize in minutes** — Add tools, swap models, tune prompts when you need to
-
----
-
-## Documentation
-
-- [docs.langchain.com](https://docs.langchain.com/oss/python/deepagents/overview) – Comprehensive documentation, including conceptual overviews and guides
-- [reference.langchain.com/python](https://reference.langchain.com/python/deepagents/) – API reference docs for Deep Agents packages
-- [Chat LangChain](https://chat.langchain.com/) – Chat with the LangChain documentation and get answers to your questions
-
-**Discussions**: Visit the [LangChain Forum](https://forum.langchain.com) to connect with the community and share all of your technical questions, ideas, and feedback.
-
-## Additional resources
-
-- **[Examples](examples/)** — Working agents and patterns
-- [Contributing Guide](https://docs.langchain.com/oss/python/contributing/overview) – Learn how to contribute to LangChain projects and find good first issues.
-- [Code of Conduct](https://github.com/langchain-ai/langchain/?tab=coc-ov-file) – Our community guidelines and standards for participation.
-
----
-
-## Acknowledgements
-
-This project was primarily inspired by Claude Code, and initially was largely an attempt to see what made Claude Code general purpose, and make it even more so.
-
-## Security
-
-Deep Agents follows a "trust the LLM" model. The agent can do anything its tools allow. Enforce boundaries at the tool/sandbox level, not by expecting the model to self-police. See the [security policy](https://github.com/langchain-ai/deepagents?tab=security-ov-file) for more information.
+MIT
