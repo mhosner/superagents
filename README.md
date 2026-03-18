@@ -127,15 +127,7 @@ superagents/
 
 ## Status
 
-This project is in early development. Current phase:
-
-- [x] Project architecture and CLAUDE.md
-- [x] Phase 1 design spec: Telemetry skeleton
-- [ ] Phase 1 implementation: `provider.py`, `spans.py`, 15 tests
-- [ ] Phase 2: BasePersona + Autonomy policy engine
-- [ ] Phase 3: Product Manager persona + ported Manna Ray skills
-- [ ] Phase 4: Additional personas (Architect, Developer, QA, Scrum Master)
-- [ ] Phase 5: End-to-end workflow (idea → tested code with full trace)
+This project is in early development.
 
 ## Getting started
 
