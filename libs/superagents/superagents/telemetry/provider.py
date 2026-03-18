@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.trace import NoOpTracer, Tracer
+
+if TYPE_CHECKING:
+    from opentelemetry.sdk.trace.export import SpanExporter
 
 _provider: TracerProvider | None = None
 _NOOP_TRACER = NoOpTracer()
@@ -50,16 +54,18 @@ def init_telemetry(
     if _provider is not None:
         return _provider
 
-    from opentelemetry import trace
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry import trace  # noqa: PLC0415
+    from opentelemetry.sdk.resources import Resource  # noqa: PLC0415
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # noqa: PLC0415
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (  # noqa: PLC0415
+        InMemorySpanExporter,
+    )
 
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(resource=resource)
 
     if exporter is None:
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # noqa: PLC0415
             OTLPSpanExporter,
         )
 
@@ -68,7 +74,7 @@ def init_telemetry(
     if isinstance(exporter, InMemorySpanExporter):
         provider.add_span_processor(SimpleSpanProcessor(exporter))
     else:
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: PLC0415
 
         provider.add_span_processor(BatchSpanProcessor(exporter))
 

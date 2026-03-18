@@ -6,7 +6,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from superagents.telemetry.provider import init_telemetry, reset_telemetry
 
 
-@pytest.fixture()
+@pytest.fixture
 def exporter():
     """Provide a fresh InMemorySpanExporter with full init/reset lifecycle.
 

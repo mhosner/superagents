@@ -1,3 +1,6 @@
+import pytest
+from opentelemetry.trace import StatusCode
+
 from superagents.telemetry.spans import (
     approval_gate_span,
     handoff_span,
@@ -62,7 +65,7 @@ def test_approval_gate_span_sentinel_defaults(exporter):
 def test_approval_gate_span_caller_sets_outcome(exporter):
     """Caller can overwrite sentinel values on the yielded span."""
     with approval_gate_span("prd_review", autonomy_level=1) as span:
-        span.set_attribute("approval.required", True)
+        span.set_attribute("approval.required", True)  # noqa: FBT003
         span.set_attribute("approval.outcome", "approved")
         span.set_attribute("gate_duration_ms", 1200)
 
@@ -76,9 +79,8 @@ def test_approval_gate_span_caller_sets_outcome(exporter):
 
 def test_span_nesting_creates_parent_child(exporter):
     """A skill_span inside a persona_span has the correct parent-child relationship."""
-    with persona_span("product_manager", autonomy_level=2):
-        with skill_span("prd_generator"):
-            pass
+    with persona_span("product_manager", autonomy_level=2), skill_span("prd_generator"):
+        pass
 
     spans = exporter.get_finished_spans()
     assert len(spans) == 2
@@ -102,12 +104,9 @@ def test_skill_span_as_root_has_no_persona_parent(exporter):
 
 def test_context_manager_sets_error_on_exception(exporter):
     """An exception inside a span sets status to ERROR and records the exception."""
-    import pytest
-    from opentelemetry.trace import StatusCode
-
-    with pytest.raises(ValueError, match="test error"):
-        with skill_span("failing_skill"):
-            raise ValueError("test error")
+    msg = "test error"
+    with pytest.raises(ValueError, match=msg), skill_span("failing_skill"):
+        raise ValueError(msg)
 
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
@@ -117,4 +116,4 @@ def test_context_manager_sets_error_on_exception(exporter):
     events = span.events
     assert len(events) == 1
     assert events[0].name == "exception"
-    assert events[0].attributes["exception.message"] == "test error"
+    assert events[0].attributes["exception.message"] == msg
