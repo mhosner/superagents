@@ -72,3 +72,49 @@ def test_approval_gate_span_caller_sets_outcome(exporter):
     assert span.attributes["approval.required"] is True
     assert span.attributes["approval.outcome"] == "approved"
     assert span.attributes["gate_duration_ms"] == 1200
+
+
+def test_span_nesting_creates_parent_child(exporter):
+    """A skill_span inside a persona_span has the correct parent-child relationship."""
+    with persona_span("product_manager", autonomy_level=2):
+        with skill_span("prd_generator"):
+            pass
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 2
+
+    child = next(s for s in spans if s.name == "skill.prd_generator")
+    parent_span = next(s for s in spans if s.name == "persona.product_manager")
+
+    assert child.context.trace_id == parent_span.context.trace_id
+    assert child.parent.span_id == parent_span.context.span_id
+
+
+def test_skill_span_as_root_has_no_persona_parent(exporter):
+    """A standalone skill_span is a root span with no parent."""
+    with skill_span("standalone_skill"):
+        pass
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].parent is None
+
+
+def test_context_manager_sets_error_on_exception(exporter):
+    """An exception inside a span sets status to ERROR and records the exception."""
+    import pytest
+    from opentelemetry.trace import StatusCode
+
+    with pytest.raises(ValueError, match="test error"):
+        with skill_span("failing_skill"):
+            raise ValueError("test error")
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.status.status_code == StatusCode.ERROR
+
+    events = span.events
+    assert len(events) == 1
+    assert events[0].name == "exception"
+    assert events[0].attributes["exception.message"] == "test error"
