@@ -207,7 +207,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_TASK_HEADER_RE = re.compile(r"^### Task \d+:\s*(.+)$", re.MULTILINE)
+# Colon is optional — defensive against LLM dropping it
+_TASK_HEADER_RE = re.compile(r"^### Task \d+:?\s*(.+)$", re.MULTILINE)
 _CHECKBOX_RE = re.compile(r"^- \[[ x]\]", re.MULTILINE)
 _RUN_COMMAND_RE = re.compile(r"Run:", re.MULTILINE)
 
@@ -262,7 +263,8 @@ Tasks extracted: 0
 to find header positions and names. Slice `plan_text` between consecutive header
 positions to get each task's body. The text before the first header is the plan
 preamble — skip it. For each body section, count `_CHECKBOX_RE` matches and
-check for `_RUN_COMMAND_RE`.
+check for `_RUN_COMMAND_RE`. Apply `name.strip() or "Unnamed"` to guard against
+empty capture groups (e.g., `### Task 1:` with nothing after the colon).
 
 ### SpecComplianceChecker Change (spec_compliance_checker.py)
 
@@ -358,7 +360,10 @@ never actually matched the prompt string `"## Implementation plan\n"` (space).
 Tests passed only because StubLLMClient returns empty string in non-strict mode
 and no test asserted on response content. The new key `"## Implementation plan\n"`
 fixes this. The round-trip test (test 8) depends on getting a non-empty response,
-so this fix is essential.
+so this fix is essential. This is evidence for eventually defaulting to
+`strict=True` in new unit tests — the Phase 5 decision to leave it off for
+pipeline tests was about setup cost, but unit tests with simple stubs get
+strict mode for free.
 
 ---
 
