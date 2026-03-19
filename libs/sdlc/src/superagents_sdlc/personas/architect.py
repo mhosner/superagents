@@ -124,4 +124,5 @@ class ArchitectPersona(BasePersona):
             List of artifacts from the workflow.
         """
         context.parameters["user_stories"] = Path(handoff.artifact_path).read_text()
+        context.parameters["user_stories_path"] = handoff.artifact_path
         return await self.run_spec_from_prd(context)

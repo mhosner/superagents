@@ -88,3 +88,21 @@ async def test_engine_uses_persona_override_level(exporter):
     result = await engine.evaluate_handoff(_make_handoff(artifact_type="code", source="pm"))
     assert result.approved is True
     assert result.outcome == "auto_proceeded"
+
+
+async def test_compliance_report_requires_approval_at_level_2(exporter):
+    config = PolicyConfig(autonomy_level=2)
+    gate = MockApprovalGate(should_approve=True)
+    engine = PolicyEngine(config=config, gate=gate)
+
+    result = await engine.evaluate_handoff(_make_handoff(artifact_type="compliance_report"))
+    assert result.outcome == "approved"  # delegated to gate, not auto_proceeded
+
+
+async def test_validation_report_requires_approval_at_level_2(exporter):
+    config = PolicyConfig(autonomy_level=2)
+    gate = MockApprovalGate(should_approve=True)
+    engine = PolicyEngine(config=config, gate=gate)
+
+    result = await engine.evaluate_handoff(_make_handoff(artifact_type="validation_report"))
+    assert result.outcome == "approved"  # delegated to gate, not auto_proceeded

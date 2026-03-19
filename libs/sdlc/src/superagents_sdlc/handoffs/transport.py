@@ -29,6 +29,17 @@ class Transport(Protocol):
         """
         ...
 
+    def can_reach(self, target: str) -> bool:
+        """Check if the transport can deliver to the given target.
+
+        Args:
+            target: Name of the target persona.
+
+        Returns:
+            True if the target is reachable.
+        """
+        ...
+
 
 class InProcessTransport:
     """Transport that delivers handoffs in-process via the persona registry.
@@ -44,6 +55,21 @@ class InProcessTransport:
             registry: Registry for looking up target personas.
         """
         self._registry = registry
+
+    def can_reach(self, target: str) -> bool:
+        """Check if the target persona is registered.
+
+        Args:
+            target: Name of the target persona.
+
+        Returns:
+            True if the persona is registered.
+        """
+        try:
+            self._registry.get(target)
+        except KeyError:
+            return False
+        return True
 
     async def send(self, handoff: PersonaHandoff) -> HandoffResult:
         """Serialize, deserialize, and deliver the handoff to the target.

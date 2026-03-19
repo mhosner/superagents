@@ -25,11 +25,13 @@ PLANNING_ARTIFACT_TYPES: frozenset[str] = frozenset(
     }
 )
 
-CODE_ARTIFACT_TYPES: frozenset[str] = frozenset(
+APPROVAL_REQUIRED_TYPES: frozenset[str] = frozenset(
     {
         "code",
         "test",
         "migration",
+        "compliance_report",
+        "validation_report",
     }
 )
 

@@ -77,3 +77,19 @@ async def test_transport_returns_handoff_result():
     assert result.status == "accepted"
     assert result.target_persona == "architect"
     assert result.trace_id == "trace-1"
+
+
+def test_transport_can_reach_registered():
+    persona = _make_mock_persona("architect")
+    registry = PersonaRegistry()
+    registry.register(persona)
+    transport = InProcessTransport(registry=registry)
+
+    assert transport.can_reach("architect") is True
+
+
+def test_transport_can_reach_unknown():
+    registry = PersonaRegistry()
+    transport = InProcessTransport(registry=registry)
+
+    assert transport.can_reach("nonexistent") is False

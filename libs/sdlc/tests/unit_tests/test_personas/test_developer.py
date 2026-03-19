@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 from superagents_sdlc.handoffs.contract import PersonaHandoff
 from superagents_sdlc.handoffs.registry import PersonaRegistry
 from superagents_sdlc.handoffs.transport import InProcessTransport
+from superagents_sdlc.personas.base import BasePersona
 from superagents_sdlc.personas.developer import DeveloperPersona
 from superagents_sdlc.policy.config import PolicyConfig
 from superagents_sdlc.policy.engine import PolicyEngine
@@ -146,3 +147,73 @@ async def test_developer_handle_handoff_loads_tech_spec_from_metadata(exporter, 
     assert "REST API" in context.parameters["tech_spec"]
     assert len(artifacts) == 1
     assert artifacts[0].artifact_type == "code"
+
+
+class StubQAPersona(BasePersona):
+    """Stub QA that stores received handoffs."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.received: list[PersonaHandoff] = []
+
+    async def receive_handoff(self, handoff: PersonaHandoff) -> None:
+        self.received.append(handoff)
+
+
+async def test_developer_conditional_handoff_to_qa(exporter, tmp_path):
+    """When QA is registered, Developer hands off with full metadata."""
+    llm = _make_stub_llm()
+    config = PolicyConfig(autonomy_level=2)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+    registry = PersonaRegistry()
+    transport = InProcessTransport(registry=registry)
+
+    dev = DeveloperPersona(llm=llm, policy_engine=engine, transport=transport)
+    qa = StubQAPersona(
+        name="qa",
+        skills={},
+        policy_engine=PolicyEngine(config=config, gate=AutoApprovalGate()),
+        transport=InProcessTransport(registry=registry),
+    )
+    registry.register(dev)
+    registry.register(qa)
+
+    context = SkillContext(
+        artifact_dir=tmp_path,
+        parameters={
+            "implementation_plan": "## Tasks\n1. Create model",
+            "tech_spec": "# Tech Spec\nREST API",
+            "tech_spec_path": "/artifacts/spec.md",
+            "user_stories_path": "/artifacts/stories.md",
+            "implementation_plan_path": "/artifacts/plan.md",
+            "prd_path": "/artifacts/prd.md",
+        },
+        trace_id="trace-1",
+    )
+
+    await dev.run_plan_from_spec(context)
+
+    assert len(qa.received) == 1
+    handoff = qa.received[0]
+    assert handoff.source_persona == "developer"
+    assert handoff.target_persona == "qa"
+    assert handoff.artifact_type == "code"
+    assert handoff.metadata["tech_spec_path"] == "/artifacts/spec.md"
+    assert handoff.metadata["user_stories_path"] == "/artifacts/stories.md"
+    assert handoff.metadata["implementation_plan_path"] == "/artifacts/plan.md"
+    assert handoff.metadata["prd_path"] == "/artifacts/prd.md"
+
+
+async def test_developer_no_handoff_without_qa(exporter, tmp_path):
+    """When QA is not registered, Developer skips handoff silently."""
+    dev, _ = _make_developer(tmp_path)
+    context = _make_context(tmp_path)
+
+    artifacts = await dev.run_plan_from_spec(context)
+
+    assert len(artifacts) == 1
+    # No handoff span should exist for developer→qa
+    spans = exporter.get_finished_spans()
+    handoff_spans = [s for s in spans if s.name.startswith("handoff.")]
+    dev_to_qa = [s for s in handoff_spans if "qa" in str(s.attributes.get("handoff.target", ""))]
+    assert len(dev_to_qa) == 0

@@ -1,4 +1,4 @@
-"""Developer persona — TDD code plan generation."""
+"""QA persona — compliance checking and validation reporting."""
 
 from __future__ import annotations
 
@@ -10,7 +10,10 @@ from superagents.telemetry import persona_span
 
 from superagents_sdlc.personas.base import BasePersona
 from superagents_sdlc.skills.base import SkillValidationError
-from superagents_sdlc.skills.engineering.code_planner import CodePlanner
+from superagents_sdlc.skills.qa.spec_compliance_checker import SpecComplianceChecker
+from superagents_sdlc.skills.qa.validation_report_generator import (
+    ValidationReportGenerator,
+)
 
 if TYPE_CHECKING:
     from superagents_sdlc.handoffs.contract import PersonaHandoff
@@ -21,11 +24,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_REQUIRED_CONTEXT = ("implementation_plan", "tech_spec")
+_REQUIRED_CONTEXT = ("code_plan", "user_stories", "tech_spec")
 
 
-class DeveloperPersona(BasePersona):
-    """Developer persona producing TDD code plans."""
+class QAPersona(BasePersona):
+    """QA persona performing compliance checking and readiness certification."""
 
     def __init__(
         self,
@@ -42,10 +45,11 @@ class DeveloperPersona(BasePersona):
             transport: Transport for delivering handoffs.
         """
         skills = {
-            "code_planner": CodePlanner(llm=llm),
+            "spec_compliance_checker": SpecComplianceChecker(llm=llm),
+            "validation_report_generator": ValidationReportGenerator(llm=llm),
         }
         super().__init__(
-            name="developer",
+            name="qa",
             skills=skills,
             policy_engine=policy_engine,
             transport=transport,
@@ -60,59 +64,52 @@ class DeveloperPersona(BasePersona):
         """
         self.received.append(handoff)
         logger.info(
-            "Developer received handoff from %s: %s",
+            "QA received handoff from %s: %s",
             handoff.source_persona,
             handoff.artifact_type,
         )
 
-    async def run_plan_from_spec(self, context: SkillContext) -> list[Artifact]:
-        """Run the code planning workflow.
+    async def run_validation(self, context: SkillContext) -> list[Artifact]:
+        """Run the validation workflow.
+
+        Linear pipeline: compliance check -> validation report.
 
         Args:
-            context: Execution context with implementation_plan and tech_spec.
+            context: Execution context with code_plan, user_stories, tech_spec.
 
         Returns:
-            List of one artifact: [code_plan].
+            List of two artifacts: [compliance_report, validation_report].
 
         Raises:
             SkillValidationError: If required context keys are missing.
         """
+        # Pre-flight: fail fast before persona_span opens to avoid orphaned traces.
+        # Skills also validate in execute_skill(), but that's inside the span.
         for key in _REQUIRED_CONTEXT:
             if key not in context.parameters:
-                msg = f"Missing required context for developer workflow: {key}"
+                msg = f"Missing required context for QA workflow: {key}"
                 raise SkillValidationError(msg)
 
         level = self.policy_engine.config.level_for(self.name)
 
         with persona_span(self.name, autonomy_level=level):
-            code_plan_artifact = await self.execute_skill("code_planner", context)
+            # Step 1: Run compliance check
+            compliance_artifact = await self.execute_skill("spec_compliance_checker", context)
+            compliance_content = Path(compliance_artifact.path).read_text()
+            context.parameters["compliance_report"] = compliance_content
 
-            # Conditional: hand off to QA if registered
-            if self.transport.can_reach("qa"):
-                await self.request_handoff(
-                    target="qa",
-                    artifact=code_plan_artifact,
-                    context_summary="Code plan ready for compliance review",
-                    metadata={
-                        "tech_spec_path": context.parameters.get("tech_spec_path", ""),
-                        "user_stories_path": context.parameters.get("user_stories_path", ""),
-                        "implementation_plan_path": context.parameters.get(
-                            "implementation_plan_path", ""
-                        ),
-                        "prd_path": context.parameters.get("prd_path", ""),
-                    },
-                )
+            # Step 2: Generate validation report
+            validation_artifact = await self.execute_skill("validation_report_generator", context)
 
-        return [code_plan_artifact]
+        return [compliance_artifact, validation_artifact]
 
     async def handle_handoff(
         self, handoff: PersonaHandoff, context: SkillContext
     ) -> list[Artifact]:
-        """Build context from a handoff and run the code planning workflow.
+        """Build context from a handoff and run the validation workflow.
 
-        Reads the implementation plan from the handoff artifact path and the
-        tech spec from the metadata. Optionally loads user_stories and prd
-        if paths are present in metadata.
+        Reads the code plan from the primary artifact and loads tech spec,
+        user stories, and optional context from metadata paths.
 
         Args:
             handoff: Incoming handoff with artifact path and metadata.
@@ -121,19 +118,19 @@ class DeveloperPersona(BasePersona):
         Returns:
             List of artifacts from the workflow.
         """
-        context.parameters["implementation_plan"] = Path(handoff.artifact_path).read_text()
-        context.parameters["implementation_plan_path"] = handoff.artifact_path
+        # Required: code plan from primary artifact
+        context.parameters["code_plan"] = Path(handoff.artifact_path).read_text()
 
+        # Required: tech spec and user stories from metadata
         tech_spec_path = handoff.metadata["tech_spec_path"]
         context.parameters["tech_spec"] = Path(tech_spec_path).read_text()
-        context.parameters["tech_spec_path"] = tech_spec_path
 
-        # Forward optional path metadata for downstream handoffs
-        context.parameters["user_stories_path"] = handoff.metadata.get("user_stories_path", "")
-        context.parameters["prd_path"] = handoff.metadata.get("prd_path", "")
+        user_stories_path = handoff.metadata["user_stories_path"]
+        context.parameters["user_stories"] = Path(user_stories_path).read_text()
 
+        # Optional: implementation plan and PRD
         for meta_key, param_key in [
-            ("user_stories_path", "user_stories"),
+            ("implementation_plan_path", "implementation_plan"),
             ("prd_path", "prd"),
         ]:
             path_str = handoff.metadata.get(meta_key, "")
@@ -142,4 +139,4 @@ class DeveloperPersona(BasePersona):
                 if file_path.exists():
                     context.parameters[param_key] = file_path.read_text()
 
-        return await self.run_plan_from_spec(context)
+        return await self.run_validation(context)
