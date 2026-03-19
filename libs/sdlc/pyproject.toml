@@ -52,6 +52,7 @@ docstring-code-format = true
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
+    "ASYNC240", # Sync pathlib in async — intentional for small local file reads
     "COM812",  # Trailing comma — conflicts with formatter
     "ISC001",  # Implicit string concat — conflicts with formatter
     "FIX002",  # Line contains TODO

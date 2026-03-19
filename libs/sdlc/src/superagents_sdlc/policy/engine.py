@@ -21,6 +21,7 @@ PLANNING_ARTIFACT_TYPES: frozenset[str] = frozenset(
         "roadmap",
         "backlog",
         "architecture",
+        "implementation_plan",
     }
 )
 

@@ -6,7 +6,9 @@ These models must round-trip through ``model_dump_json()`` /
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class PersonaHandoff(BaseModel):
@@ -22,6 +24,7 @@ class PersonaHandoff(BaseModel):
         requires_approval: Whether a human gate is required.
         trace_id: OpenTelemetry trace identifier.
         parent_span_id: Span identifier for parent linking.
+        metadata: Structured key-value pairs for inter-persona routing.
     """
 
     source_persona: str
@@ -33,6 +36,7 @@ class PersonaHandoff(BaseModel):
     requires_approval: bool
     trace_id: str
     parent_span_id: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class HandoffResult(BaseModel):

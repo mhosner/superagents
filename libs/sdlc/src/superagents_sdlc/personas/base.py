@@ -11,6 +11,8 @@ from superagents.telemetry import handoff_span, skill_span
 from superagents_sdlc.handoffs.contract import HandoffResult, PersonaHandoff
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from superagents_sdlc.handoffs.transport import Transport
     from superagents_sdlc.policy.engine import PolicyEngine
     from superagents_sdlc.skills.base import Artifact, BaseSkill, SkillContext
@@ -87,6 +89,7 @@ class BasePersona(ABC):
         target: str,
         artifact: Artifact,
         context_summary: str,
+        metadata: dict[str, Any] | None = None,
     ) -> HandoffResult:
         """Request a handoff to another persona.
 
@@ -97,6 +100,7 @@ class BasePersona(ABC):
             target: Target persona name.
             artifact: The artifact to hand off.
             context_summary: Compressed context for the receiver.
+            metadata: Structured key-value pairs for inter-persona routing.
 
         Returns:
             The handoff result.
@@ -120,6 +124,7 @@ class BasePersona(ABC):
                 requires_approval=False,
                 trace_id=trace_id,
                 parent_span_id=parent_span_id,
+                metadata=metadata or {},
             )
 
             # Evaluate through policy engine
