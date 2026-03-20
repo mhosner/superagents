@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -54,10 +58,14 @@ def test_load_context_invalid_dir_raises():
 
 def test_parse_idea_to_code():
     parser = _build_parser()
-    args = parser.parse_args([
-        "idea-to-code", "Add dark mode",
-        "--output-dir", "/tmp/out",
-    ])
+    args = parser.parse_args(
+        [
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            "/tmp/out",
+        ]
+    )
 
     assert args.command == "idea-to-code"
     assert args.idea == "Add dark mode"
@@ -71,12 +79,18 @@ def test_parse_idea_to_code():
 
 def test_parse_spec_from_prd():
     parser = _build_parser()
-    args = parser.parse_args([
-        "spec-from-prd", "/path/prd.md",
-        "--user-stories", "/path/stories.md",
-        "--output-dir", "/tmp/out",
-        "--autonomy-level", "2",
-    ])
+    args = parser.parse_args(
+        [
+            "spec-from-prd",
+            "/path/prd.md",
+            "--user-stories",
+            "/path/stories.md",
+            "--output-dir",
+            "/tmp/out",
+            "--autonomy-level",
+            "2",
+        ]
+    )
 
     assert args.command == "spec-from-prd"
     assert args.prd_path == "/path/prd.md"
@@ -86,13 +100,18 @@ def test_parse_spec_from_prd():
 
 def test_parse_plan_from_spec():
     parser = _build_parser()
-    args = parser.parse_args([
-        "plan-from-spec",
-        "--plan", "/path/plan.md",
-        "--spec", "/path/spec.md",
-        "--output-dir", "/tmp/out",
-        "--stub",
-    ])
+    args = parser.parse_args(
+        [
+            "plan-from-spec",
+            "--plan",
+            "/path/plan.md",
+            "--spec",
+            "/path/spec.md",
+            "--output-dir",
+            "/tmp/out",
+            "--stub",
+        ]
+    )
 
     assert args.command == "plan-from-spec"
     assert args.plan == "/path/plan.md"
@@ -101,20 +120,18 @@ def test_parse_plan_from_spec():
     assert args.stub is True
 
 
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-
 def test_stub_end_to_end(tmp_path):
     output_dir = tmp_path / "output"
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "idea-to-code", "Add dark mode",
-            "--output-dir", str(output_dir),
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
             "--stub",
         ],
         capture_output=True,
@@ -134,10 +151,16 @@ def test_json_output(tmp_path):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "idea-to-code", "Add dark mode",
-            "--output-dir", str(output_dir),
-            "--stub", "--json", "--quiet",
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+            "--json",
+            "--quiet",
         ],
         capture_output=True,
         text=True,
@@ -159,10 +182,15 @@ def test_json_output(tmp_path):
 def test_error_exit_code(tmp_path):
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "idea-to-code", "Test error",
-            "--output-dir", str(tmp_path / "output"),
-            "--context-dir", "/nonexistent/path/that/does/not/exist",
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Test error",
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--context-dir",
+            "/nonexistent/path/that/does/not/exist",
             "--stub",
         ],
         capture_output=True,
