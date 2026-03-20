@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from superagents_sdlc.cli import _load_context
+from superagents_sdlc.cli import _build_parser, _load_context
 from superagents_sdlc.skills.llm import LLMClient
 
 
@@ -50,3 +50,52 @@ def test_load_context_none_returns_empty():
 def test_load_context_invalid_dir_raises():
     with pytest.raises(FileNotFoundError):
         _load_context("/nonexistent/path/that/does/not/exist")
+
+
+def test_parse_idea_to_code():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "idea-to-code", "Add dark mode",
+        "--output-dir", "/tmp/out",
+    ])
+
+    assert args.command == "idea-to-code"
+    assert args.idea == "Add dark mode"
+    assert args.output_dir == "/tmp/out"
+    assert args.autonomy_level == 3
+    assert args.model == "claude-sonnet-4-6"
+    assert args.stub is False
+    assert args.json is False
+    assert args.context_dir is None
+
+
+def test_parse_spec_from_prd():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "spec-from-prd", "/path/prd.md",
+        "--user-stories", "/path/stories.md",
+        "--output-dir", "/tmp/out",
+        "--autonomy-level", "2",
+    ])
+
+    assert args.command == "spec-from-prd"
+    assert args.prd_path == "/path/prd.md"
+    assert args.user_stories == "/path/stories.md"
+    assert args.autonomy_level == 2
+
+
+def test_parse_plan_from_spec():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "plan-from-spec",
+        "--plan", "/path/plan.md",
+        "--spec", "/path/spec.md",
+        "--output-dir", "/tmp/out",
+        "--stub",
+    ])
+
+    assert args.command == "plan-from-spec"
+    assert args.plan == "/path/plan.md"
+    assert args.spec == "/path/spec.md"
+    assert args.user_stories is None
+    assert args.stub is True
