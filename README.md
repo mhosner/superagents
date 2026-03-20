@@ -1,6 +1,6 @@
 # Superagents
 
-An agentic software development lifecycle framework that maps AI agents to enterprise SDLC roles — so organizations can adopt agentic coding incrementally, with every persona accountable to a real human.
+An agentic software development lifecycle framework that maps AI agents to enterprise SDLC roles — so organizations can adopt agentic coding incrementally, with every persona accountable to a human.
 
 Built on [Deep Agents](https://github.com/langchain-ai/deepagents) (runtime), [Superpowers](https://github.com/obra/superpowers) (TDD methodology), and the [A2A Protocol](https://github.com/a2aproject/A2A) (agent communication).
 
@@ -113,12 +113,13 @@ superagents/
 │   │       └── telemetry/    # OpenTelemetry instrumentation
 │   ├── sdlc/                 # SDLC integration package
 │   │   └── src/superagents_sdlc/
-│   │       ├── personas/     # SDLC persona facades
-│   │       ├── skills/       # Ported PM, engineering, QA skills
-│   │       ├── policy/       # Autonomy policy engine
-│   │       ├── handoffs/     # A2A-based handoff implementation
-│   │       └── workflows/    # SDLC workflow definitions
-│   ├── cli/                  # Terminal UI (Textual)
+│   │       ├── personas/     # PM, Architect, Developer, QA persona facades
+│   │       ├── skills/       # PM, engineering, QA skills + LLM abstraction
+│   │       ├── policy/       # Autonomy policy engine + approval gates
+│   │       ├── handoffs/     # A2A-shaped handoff transport + registry
+│   │       ├── workflows/    # Pipeline orchestrator + result types
+│   │       └── cli.py        # Standalone CLI (superagents-sdlc command)
+│   ├── cli/                  # Terminal UI (Textual, Deep Agents)
 │   ├── harbor/               # Evaluation/benchmark framework
 │   └── partners/             # Integration packages
 ├── .github/                  # CI/CD
@@ -127,7 +128,25 @@ superagents/
 
 ## Status
 
-This project is in early development.
+Active development. The SDLC integration package (`libs/sdlc`) implements all four core personas, eight skills, the autonomy policy engine, A2A-shaped handoff system, pipeline orchestrator, and a standalone CLI. 187 tests, all passing.
+
+### What's built (Phases 1-8)
+
+| Phase | What | Tests |
+| ----- | ---- | ----- |
+| 1 | OpenTelemetry instrumentation (spans for personas, skills, handoffs, approval gates) | 15 |
+| 2 | BasePersona ABC, BaseSkill contract, PolicyEngine, A2A handoff system, PersonaRegistry | 39 |
+| 3 | PM persona with LLM abstraction (PrdGenerator, PrioritizationEngine, UserStoryWriter) | 30 |
+| 4 | Architect + Developer personas (TechSpecWriter, ImplementationPlanner, CodePlanner) | 34 |
+| 5 | QA persona (SpecComplianceChecker, ValidationReportGenerator) | 29 |
+| 6 | Executable plan format (plan parser, structured QA input, Superpowers format) | 9 |
+| 7 | Pipeline orchestrator (PipelineOrchestrator with named workflow methods) | 17 |
+| 8 | Standalone CLI + AnthropicLLMClient (argparse wrapper, `--stub` mode, `--json` output) | 14 |
+
+### What's next
+
+- **Phase 9**: Deep Agents TUI integration
+- **Phase 10**: Harbor evaluation framework integration
 
 ## Getting started
 
@@ -135,29 +154,51 @@ This project is in early development.
 
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with [Superpowers plugin](https://github.com/obra/superpowers)
 
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/superagents.git
-cd superagents
+git clone https://github.com/mhosner/superagents.git
+cd superagents/libs/sdlc
 
-# Install the SDLC package and its dependencies
-cd libs/sdlc
-uv init --name superagents-sdlc --python ">=3.12"
-uv add opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
-uv add a2a-sdk pydantic
-uv add --group test pytest pytest-asyncio
-uv add --editable ../superagents
+# Install the SDLC package (editable, with test deps)
+uv sync --group test
+
+# Optional: install Anthropic SDK for real LLM calls
+uv sync --group test --extra anthropic
+```
+
+### Run the CLI
+
+```bash
+# With stub responses (no API key needed)
+uv run superagents-sdlc idea-to-code "Add dark mode" --output-dir ./output --stub
+
+# With real Anthropic API
+export ANTHROPIC_API_KEY=sk-...
+uv run superagents-sdlc idea-to-code "Add dark mode" \
+  --context-dir ./my-project/context \
+  --output-dir ./output
+
+# JSON output for scripting
+uv run superagents-sdlc idea-to-code "Add dark mode" --output-dir ./output --stub --json --quiet
+```
+
+Three subcommands matching the three pipeline entry points:
+
+```bash
+superagents-sdlc idea-to-code <idea> --output-dir <dir>          # Full: PM -> Arch -> Dev -> QA
+superagents-sdlc spec-from-prd <prd> --user-stories <stories> --output-dir <dir>  # Skip PM
+superagents-sdlc plan-from-spec --plan <plan> --spec <spec> --output-dir <dir>    # Skip PM + Arch
 ```
 
 ### Development
 
 ```bash
-make test       # Run unit tests (no network)
-make lint       # Lint with ruff
-make format     # Format with ruff
+cd libs/sdlc
+uv run --group test pytest tests/             # Run unit tests (no network)
+uv run --group test ruff check src/ tests/    # Lint
+uv run --group test ruff format src/ tests/   # Format
 ```
 
 All development follows the Superpowers TDD methodology. See [CLAUDE.md](CLAUDE.md) for standards.
@@ -169,8 +210,6 @@ Superagents wouldn't exist without these projects:
 - **[Deep Agents](https://github.com/langchain-ai/deepagents)** — The SDK and agent harness this project is forked from.
 - **[Superpowers](https://github.com/obra/superpowers)** by Jesse Vincent — The TDD-first agentic development methodology that is the engineering backbone of this project.
 - **[BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD)** — The persona-driven agile AI framework that inspired the SDLC role mapping and adoption gradient.
-- **[Manna Ray](https://github.com/mhosner/manna_ray)** — The PM skills and workflow definitions being ported into the persona layer.
-- **[Strangler Fig Newton](https://github.com/mhosner/strangler_fig_newton)** — The legacy migration plugin for monolith-to-microservice decomposition.
 - **[A2A Protocol](https://github.com/a2aproject/A2A)** — The open standard for agent-to-agent communication.
 
 ## License
