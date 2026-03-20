@@ -67,3 +67,56 @@ class StubLLMClient:
             msg = f"No response matched prompt: {prompt[:100]}"
             raise ValueError(msg)
         return ""
+
+
+class AnthropicLLMClient:
+    """LLMClient implementation using Anthropic's API.
+
+    Requires the ``anthropic`` package (``pip install superagents-sdlc[anthropic]``).
+    Uses ``AsyncAnthropic`` for async-native HTTP calls.
+
+    Attributes:
+        model: Anthropic model identifier.
+    """
+
+    def __init__(self, *, model: str = "claude-sonnet-4-6", api_key: str | None = None) -> None:
+        """Initialize with model and optional API key.
+
+        Args:
+            model: Anthropic model to use.
+            api_key: API key. Falls back to ``ANTHROPIC_API_KEY`` env var if omitted.
+
+        Raises:
+            ImportError: If the ``anthropic`` package is not installed.
+        """
+        try:
+            import anthropic  # noqa: PLC0415
+        except ImportError:
+            msg = (
+                "anthropic package not installed. "
+                "Run: pip install superagents-sdlc[anthropic]"
+            )
+            raise ImportError(msg) from None
+
+        self.model = model
+        self._client = anthropic.AsyncAnthropic(api_key=api_key)
+
+    async def generate(self, prompt: str, *, system: str = "") -> str:
+        """Generate a response via the Anthropic API.
+
+        Args:
+            prompt: User prompt.
+            system: Optional system prompt.
+
+        Returns:
+            Raw response text.
+        """
+        kwargs: dict[str, object] = {
+            "model": self.model,
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if system:
+            kwargs["system"] = system
+        response = await self._client.messages.create(**kwargs)
+        return response.content[0].text
