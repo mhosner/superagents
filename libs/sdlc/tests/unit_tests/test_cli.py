@@ -101,6 +101,7 @@ def test_parse_plan_from_spec():
     assert args.stub is True
 
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -126,3 +127,49 @@ def test_stub_end_to_end(tmp_path):
     assert "Certification:" in result.stdout
     assert (output_dir / "pm").is_dir()
     assert (output_dir / "qa").is_dir()
+
+
+def test_json_output(tmp_path):
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "idea-to-code", "Add dark mode",
+            "--output-dir", str(output_dir),
+            "--stub", "--json", "--quiet",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    data = json.loads(result.stdout)
+    assert "certification" in data
+    assert "artifacts" in data
+    assert "pm" in data
+    assert "architect" in data
+    assert "developer" in data
+    assert "qa" in data
+    assert len(data["artifacts"]) == 8
+
+
+def test_error_exit_code(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "idea-to-code", "Test error",
+            "--output-dir", str(tmp_path / "output"),
+            "--context-dir", "/nonexistent/path/that/does/not/exist",
+            "--stub",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 1
+    assert "Error" in result.stderr
