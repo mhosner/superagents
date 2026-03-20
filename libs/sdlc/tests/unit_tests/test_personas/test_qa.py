@@ -144,3 +144,40 @@ async def test_qa_preflight_fails_missing_context(exporter, tmp_path):
 
     with pytest.raises(SkillValidationError, match="code_plan"):
         await qa.run_validation(context)
+
+
+async def test_qa_handle_handoff_without_user_stories_path(exporter, tmp_path):
+    qa, _ = _make_qa(tmp_path)
+
+    code_plan_path = tmp_path / "code_plan.md"
+    code_plan_path.write_text("## Task 1: Toggle\n- [ ] Step 1\nRun: pytest")
+
+    spec_path = tmp_path / "tech_spec.md"
+    spec_path.write_text("# Tech Spec\nREST API")
+
+    handoff = PersonaHandoff(
+        source_persona="developer",
+        target_persona="qa",
+        artifact_type="code",
+        artifact_path=str(code_plan_path),
+        context_summary="Code plan ready",
+        autonomy_level=2,
+        requires_approval=False,
+        trace_id="trace-1",
+        parent_span_id="span-1",
+        metadata={
+            "tech_spec_path": str(spec_path),
+            "user_stories_path": "",
+        },
+    )
+
+    output_dir = tmp_path / "qa_output"
+    output_dir.mkdir()
+    context = SkillContext(
+        artifact_dir=output_dir,
+        parameters={"user_stories": "Pre-loaded stories"},
+        trace_id="trace-1",
+    )
+
+    artifacts = await qa.handle_handoff(handoff, context)
+    assert len(artifacts) == 2

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from superagents_sdlc.skills.base import Artifact, BaseSkill, SkillValidationError
+from superagents_sdlc.skills.engineering.plan_parser import extract_tasks, summarize_plan
 
 if TYPE_CHECKING:
     from superagents_sdlc.skills.base import SkillContext
@@ -82,6 +83,9 @@ class SpecComplianceChecker(BaseSkill):
     async def execute(self, context: SkillContext) -> Artifact:
         """Run compliance check against the code plan.
 
+        Parses the code plan for structured task data, then composes
+        a prompt with both quantitative summary and raw plan text.
+
         Args:
             context: Execution context with code plan, user stories, and tech spec.
 
@@ -89,9 +93,15 @@ class SpecComplianceChecker(BaseSkill):
             Artifact pointing to the compliance report.
         """
         params = context.parameters
+        code_plan = params["code_plan"]
+
+        # Parse plan for structured analysis
+        tasks = extract_tasks(code_plan)
+        summary = summarize_plan(tasks)
 
         prompt_parts = [
-            f"## Code plan\n{params['code_plan']}",
+            summary,
+            f"## Code plan\n{code_plan}",
             f"## User stories\n{params['user_stories']}",
             f"## Technical specification\n{params['tech_spec']}",
         ]

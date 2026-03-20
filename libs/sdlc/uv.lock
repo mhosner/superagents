@@ -1430,6 +1430,11 @@ dependencies = [
     { name = "superagents" },
 ]
 
+[package.optional-dependencies]
+anthropic = [
+    { name = "anthropic" },
+]
+
 [package.dev-dependencies]
 test = [
     { name = "pytest" },
@@ -1441,10 +1446,12 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "superagents", editable = "../superagents" },
 ]
+provides-extras = ["anthropic"]
 
 [package.metadata.requires-dev]
 test = [

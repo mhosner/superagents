@@ -8,6 +8,7 @@ import pytest
 
 from superagents_sdlc.skills.base import SkillContext, SkillValidationError
 from superagents_sdlc.skills.engineering.code_planner import CodePlanner
+from superagents_sdlc.skills.engineering.plan_parser import extract_tasks
 from superagents_sdlc.skills.llm import StubLLMClient
 
 if TYPE_CHECKING:
@@ -17,10 +18,31 @@ if TYPE_CHECKING:
 def _make_stub() -> StubLLMClient:
     return StubLLMClient(
         responses={
-            "implementation_plan": (
-                "## Task 1: Create DarkModeToggle\n"
-                "### RED\ntest_toggle_switches_theme\n"
-                "### GREEN\ndef toggle(): pass"
+            "## Implementation plan\n": (
+                "# Dark Mode Implementation Plan\n\n"
+                "> **For agentic workers:** Use superpowers:executing-plans\n"
+                "> **Note:** File paths are proposed.\n\n"
+                "**Goal:** Add dark mode toggle\n"
+                "**Architecture:** React component with CSS variables\n"
+                "**Tech Stack:** Python, pytest\n\n"
+                "---\n\n"
+                "### Task 1: Create DarkModeToggle\n\n"
+                "**Files:**\n"
+                "- Create: `src/components/toggle.py`\n"
+                "- Test: `tests/test_toggle.py`\n\n"
+                "- [ ] **Step 1: Write the failing test**\n"
+                "```python\n"
+                "def test_toggle_switches_theme():\n"
+                "    assert toggle() == 'dark'\n"
+                "```\n\n"
+                "- [ ] **Step 2: Run test**\n"
+                "Run: `pytest tests/test_toggle.py -v`\n\n"
+                "- [ ] **Step 3: Write implementation**\n"
+                "```python\n"
+                "def toggle(): return 'dark'\n"
+                "```\n\n"
+                "- [ ] **Step 4: Verify passes**\n"
+                "Run: `pytest tests/test_toggle.py -v`\n"
             ),
         }
     )
@@ -71,3 +93,18 @@ async def test_code_planner_execute_includes_context_in_prompt(tmp_path):
     prompt = stub.calls[0][0]
     assert "Create data model" in prompt
     assert "REST API" in prompt
+
+
+async def test_code_planner_output_parseable_as_plan(tmp_path):
+    stub = _make_stub()
+    skill = CodePlanner(llm=stub)
+    context = _make_context(tmp_path)
+
+    await skill.execute(context)
+
+    plan_text = (tmp_path / "code_plan.md").read_text()
+    tasks = extract_tasks(plan_text)
+    assert len(tasks) >= 1
+    assert tasks[0].name == "Create DarkModeToggle"
+    assert tasks[0].has_run_command is True
+    assert tasks[0].checkboxes == 4

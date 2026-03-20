@@ -86,3 +86,50 @@ async def test_compliance_execute_includes_context_in_prompt(tmp_path):
     assert "DarkModeToggle" in prompt
     assert "dark mode" in prompt
     assert "REST API" in prompt
+
+
+async def test_compliance_prompt_includes_plan_summary(tmp_path):
+    stub = _make_stub()
+    skill = SpecComplianceChecker(llm=stub)
+    context = SkillContext(
+        artifact_dir=tmp_path,
+        parameters={
+            "code_plan": (
+                "### Task 1: Create toggle\n\n"
+                "- [ ] **Step 1: Write test**\n"
+                "Run: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
+            "user_stories": "As a PM, I want dark mode",
+            "tech_spec": "# Tech Spec\nREST API",
+        },
+        trace_id="trace-1",
+    )
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "Tasks extracted: 1" in prompt
+    assert "Tasks with test commands: 1" in prompt
+    assert "Total steps: 2" in prompt
+    assert "### Task 1: Create toggle" in prompt
+
+
+async def test_compliance_handles_unparseable_plan(tmp_path):
+    stub = _make_stub()
+    skill = SpecComplianceChecker(llm=stub)
+    context = SkillContext(
+        artifact_dir=tmp_path,
+        parameters={
+            "code_plan": "This is not a valid plan at all.",
+            "user_stories": "As a PM, I want dark mode",
+            "tech_spec": "# Tech Spec\nREST API",
+        },
+        trace_id="trace-1",
+    )
+
+    artifact = await skill.execute(context)
+
+    assert artifact.artifact_type == "compliance_report"
+    prompt = stub.calls[0][0]
+    assert "Tasks extracted: 0" in prompt

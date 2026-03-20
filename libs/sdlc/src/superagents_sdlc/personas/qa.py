@@ -125,8 +125,9 @@ class QAPersona(BasePersona):
         tech_spec_path = handoff.metadata["tech_spec_path"]
         context.parameters["tech_spec"] = Path(tech_spec_path).read_text()
 
-        user_stories_path = handoff.metadata["user_stories_path"]
-        context.parameters["user_stories"] = Path(user_stories_path).read_text()
+        user_stories_path = handoff.metadata.get("user_stories_path", "")
+        if user_stories_path:
+            context.parameters["user_stories"] = Path(user_stories_path).read_text()
 
         # Optional: implementation plan and PRD
         for meta_key, param_key in [
