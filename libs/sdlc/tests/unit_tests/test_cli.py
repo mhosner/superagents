@@ -99,3 +99,30 @@ def test_parse_plan_from_spec():
     assert args.spec == "/path/spec.md"
     assert args.user_stories is None
     assert args.stub is True
+
+
+import subprocess
+import sys
+from pathlib import Path
+
+
+def test_stub_end_to_end(tmp_path):
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "idea-to-code", "Add dark mode",
+            "--output-dir", str(output_dir),
+            "--stub",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "Certification:" in result.stdout
+    assert (output_dir / "pm").is_dir()
+    assert (output_dir / "qa").is_dir()

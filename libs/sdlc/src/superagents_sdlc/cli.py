@@ -3,7 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
+import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from superagents_sdlc.skills.llm import LLMClient, StubLLMClient
+
+if TYPE_CHECKING:
+    from superagents_sdlc.skills.base import Artifact
+    from superagents_sdlc.workflows.result import PipelineResult
 
 # Named context files recognized by the loader.
 _CONTEXT_FILES: dict[str, str] = {
@@ -130,3 +140,166 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _stub_responses() -> dict[str, str]:
+    """Canned LLM responses for ``--stub`` mode.
+
+    Produces valid artifacts for all eight skills across four personas.
+    For development testing only — content is generic fixtures.
+
+    Returns:
+        Map of prompt substrings to stub responses.
+    """
+    # WARNING: Key ordering matters — StubLLMClient returns the first match.
+    # QA keys must come before Architect/Developer keys because QA prompts
+    # contain substrings that would collide with Architect/Developer keys.
+    return {
+        # PM skills
+        "## Items to prioritize\n": "## Rankings\n1. Feature - RICE: 42",
+        "## Idea / feature to spec\n": "# PRD: Feature\n## Problem\nNone",
+        "## Feature description\n": (
+            "## Story 1\nAs a user, I want feature\n"
+            "### Acceptance Criteria\nGiven X\nWhen Y\nThen Z"
+        ),
+        # QA skills — must come before Architect/Developer keys
+        "## Compliance report\n": (
+            "# Validation Report\n## Executive Summary\nDone.\n"
+            "## Certification\nNEEDS WORK"
+        ),
+        "## Plan structure analysis\n": (
+            "## Compliance Check\n| Feature | PASS |\n"
+            "## Summary\nTotal: 1 | Pass: 1\nOverall: NEEDS WORK"
+        ),
+        # Architect skills
+        "## PRD\n": "# Tech Spec\n## Architecture\nSimple",
+        "## Technical specification\n": "## Tasks\n1. Build it",
+        # Developer skills
+        "## Implementation plan\n": (
+            "### Task 1: Feature\n\n"
+            "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
+            "- [ ] **Step 2: Implement**\n"
+        ),
+    }
+
+
+def _serialize_result(result: PipelineResult) -> str:
+    """Serialize PipelineResult to JSON string.
+
+    Args:
+        result: Pipeline result to serialize.
+
+    Returns:
+        JSON string with indentation.
+    """
+    def _dump_artifacts(artifacts: list[Artifact]) -> list[dict[str, object]]:
+        return [a.model_dump() for a in artifacts]
+
+    data = {
+        "certification": result.certification,
+        "artifacts": _dump_artifacts(result.artifacts),
+        "pm": _dump_artifacts(result.pm),
+        "architect": _dump_artifacts(result.architect),
+        "developer": _dump_artifacts(result.developer),
+        "qa": _dump_artifacts(result.qa),
+    }
+    return json.dumps(data, indent=2)
+
+
+async def _run(args: argparse.Namespace) -> int:
+    """Run the pipeline based on parsed arguments.
+
+    Args:
+        args: Parsed CLI arguments.
+
+    Returns:
+        Exit code (0 success, 1 error).
+    """
+    from superagents_sdlc.policy.config import PolicyConfig  # noqa: PLC0415
+    from superagents_sdlc.policy.engine import PolicyEngine  # noqa: PLC0415
+    from superagents_sdlc.policy.gates import AutoApprovalGate  # noqa: PLC0415
+    from superagents_sdlc.workflows.orchestrator import PipelineOrchestrator  # noqa: PLC0415
+
+    # Load context; provide empty defaults so PM skills pass validation.
+    context = _load_context(args.context_dir)
+    context.setdefault("product_context", "")
+    context.setdefault("goals_context", "")
+    context.setdefault("personas_context", "")
+
+    # Build LLM client
+    if args.stub:
+        llm: LLMClient = StubLLMClient(responses=_stub_responses())
+    else:
+        from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
+
+        llm = AnthropicLLMClient(model=args.model)
+
+    # Build policy engine
+    config = PolicyConfig(autonomy_level=args.autonomy_level)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+
+    # Build orchestrator
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    orchestrator = PipelineOrchestrator(llm=llm, policy_engine=engine, context=context)
+
+    # Phase progress callback
+    def on_phase(name: str, artifacts: list[Artifact]) -> None:
+        if not args.quiet:
+            count = len(artifacts)
+            label = "artifact" if count == 1 else "artifacts"
+            print(f"{name.upper()} phase... done ({count} {label})")  # noqa: T201
+
+    # Run the appropriate pipeline
+    if args.command == "idea-to-code":
+        result = await orchestrator.run_idea_to_code(
+            args.idea,
+            artifact_dir=output_dir,
+            on_phase_complete=on_phase,
+        )
+    elif args.command == "spec-from-prd":
+        result = await orchestrator.run_spec_from_prd(
+            args.prd_path,
+            user_stories_path=args.user_stories,
+            artifact_dir=output_dir,
+            on_phase_complete=on_phase,
+        )
+    else:  # plan-from-spec
+        result = await orchestrator.run_plan_from_spec(
+            implementation_plan_path=args.plan,
+            tech_spec_path=args.spec,
+            artifact_dir=output_dir,
+            user_stories_path=args.user_stories,
+            on_phase_complete=on_phase,
+        )
+
+    # Output
+    if not args.quiet:
+        print(f"\nCertification: {result.certification}")  # noqa: T201
+        print(f"Artifacts written to {args.output_dir}")  # noqa: T201
+
+    if args.json:
+        print(_serialize_result(result))  # noqa: T201
+
+    return 0
+
+
+def main() -> None:
+    """CLI entry point."""
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    try:
+        code = asyncio.run(_run(args))
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    else:
+        sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()
