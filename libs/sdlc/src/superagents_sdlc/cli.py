@@ -145,7 +145,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _stub_responses() -> dict[str, str]:
     """Canned LLM responses for ``--stub`` mode.
 
-    Produces valid artifacts for all eight skills across four personas.
+    Produces valid artifacts for all nine skills across four personas.
     For development testing only — content is generic fixtures.
 
     Returns:

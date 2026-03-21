@@ -176,6 +176,8 @@ def test_json_output(tmp_path):
     assert "architect" in data
     assert "developer" in data
     assert "qa" in data
+    assert "retry_attempted" in data
+    assert "pre_retry_certification" in data
     assert len(data["artifacts"]) == 9
 
 
