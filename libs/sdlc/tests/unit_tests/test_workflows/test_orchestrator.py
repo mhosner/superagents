@@ -132,7 +132,9 @@ async def test_idea_to_code_returns_certification(exporter, tmp_path):
     result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
 
     assert result.certification != "skipped"
+    # After retry, certification is still NEEDS WORK (stubs always return it)
     assert result.certification == "NEEDS WORK"
+    assert result.retry_attempted is True
 
 
 async def test_idea_to_code_context_overrides(exporter, tmp_path):
@@ -356,7 +358,11 @@ async def test_idea_to_code_calls_phase_callback(exporter, tmp_path):
         "Add dark mode", artifact_dir=tmp_path, on_phase_complete=on_phase
     )
 
-    assert phases == [("pm", 3), ("architect", 2), ("developer", 1), ("qa", 3)]
+    # Initial phases + retry phases (architect+developer+qa re-run)
+    assert phases == [
+        ("pm", 3), ("architect", 2), ("developer", 1), ("qa", 3),
+        ("architect", 2), ("developer", 1), ("qa", 3),
+    ]
 
 
 async def test_spec_from_prd_calls_phase_callback(exporter, tmp_path):
@@ -379,7 +385,11 @@ async def test_spec_from_prd_calls_phase_callback(exporter, tmp_path):
         on_phase_complete=on_phase,
     )
 
-    assert phases == [("architect", 2), ("developer", 1), ("qa", 3)]
+    # Initial phases + retry phases (architect+developer+qa re-run)
+    assert phases == [
+        ("architect", 2), ("developer", 1), ("qa", 3),
+        ("architect", 2), ("developer", 1), ("qa", 3),
+    ]
 
 
 async def test_plan_from_spec_calls_phase_callback(exporter, tmp_path):
@@ -406,7 +416,11 @@ async def test_plan_from_spec_calls_phase_callback(exporter, tmp_path):
         on_phase_complete=on_phase,
     )
 
-    assert phases == [("developer", 1), ("qa", 3)]
+    # Initial phases + retry phases (developer+qa re-run; architect not active)
+    assert phases == [
+        ("developer", 1), ("qa", 3),
+        ("developer", 1), ("qa", 3),
+    ]
 
 
 # -- handoff assertion test --
@@ -446,3 +460,234 @@ async def test_idea_to_code_result_has_retry_fields(exporter, tmp_path):
     assert hasattr(result, "pre_retry_certification")
     assert isinstance(result.retry_attempted, bool)
     assert isinstance(result.pre_retry_certification, str)
+
+
+# -- retry pass tests --
+
+
+async def test_idea_to_code_retries_on_needs_work(exporter, tmp_path):
+    """Orchestrator retries when QA certifies NEEDS WORK with findings."""
+    orchestrator, _ = _make_orchestrator()
+
+    result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    assert result.retry_attempted is True
+    assert result.pre_retry_certification == "NEEDS WORK"
+    # After retry, QA runs again — still NEEDS WORK with stubs, but
+    # the retry was attempted
+    assert result.certification in ("NEEDS WORK", "READY", "FAILED", "unknown")
+
+
+async def test_idea_to_code_retry_re_runs_architect_and_developer(exporter, tmp_path):
+    """When routing manifest has architect findings, both architect and developer re-run."""
+    orchestrator, stub_llm = _make_orchestrator()
+
+    await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # Verify tech_spec_writer was called at least twice (initial + retry).
+    # Filter by prompt starting with "## PRD\n" to exclude implementation_planner
+    # calls which also contain "## PRD\n" as context.
+    tech_spec_calls = [
+        call for call in stub_llm.calls if call[0].startswith("## PRD\n")
+    ]
+    assert len(tech_spec_calls) >= 2
+
+
+async def test_idea_to_code_retry_injects_findings(exporter, tmp_path):
+    """Retry passes inject revision_findings into skill context."""
+    orchestrator, stub_llm = _make_orchestrator()
+
+    await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # The architect's retry call should contain revision findings.
+    # Filter by prompt starting with "## PRD\n" to isolate tech_spec_writer calls.
+    tech_spec_calls = [
+        call for call in stub_llm.calls if call[0].startswith("## PRD\n")
+    ]
+    # The second call (retry) should have revision findings
+    assert len(tech_spec_calls) >= 2
+    retry_prompt = tech_spec_calls[1][0]
+    assert "## Revision findings" in retry_prompt
+
+
+async def test_no_retry_when_ready(exporter, tmp_path):
+    """No retry when QA certifies READY."""
+    # Override validation report stub to return READY
+    stub_llm = StubLLMClient(
+        responses={
+            "## Items to prioritize\n": "## Rankings\n1. Dark mode - RICE: 42",
+            "## Idea / feature to spec\n": "# PRD: Dark Mode\n## Problem\nEye strain",
+            "## Feature description\n": (
+                "## Story 1\nAs a PM, I want dark mode\n"
+                "### Acceptance Criteria\nGiven dashboard\nWhen toggle\nThen dark"
+            ),
+            "## Compliance report\n": (
+                "# Validation Report\n## Executive Summary\nAll good.\n"
+                "## Certification\nREADY"
+            ),
+            "## Plan structure analysis\n": (
+                "## Compliance Check\n| Feature | PASS |\n"
+                "## Summary\nTotal: 1 | Pass: 1\nOverall: READY"
+            ),
+            "## PRD\n": "# Tech Spec\n## Architecture\nSimple",
+            "## Technical specification\n": "## Tasks\n1. Build it",
+            "## Implementation plan\n": (
+                "### Task 1: Feature\n\n"
+                "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
+        }
+    )
+
+    config = PolicyConfig(autonomy_level=2)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+    orchestrator = PipelineOrchestrator(
+        llm=stub_llm,
+        policy_engine=engine,
+        context={
+            "product_context": "B2B SaaS platform",
+            "goals_context": "Q1: reduce churn by 10%",
+            "personas_context": "# PM Patricia\nManages projects",
+        },
+    )
+
+    result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    assert result.retry_attempted is False
+    assert result.pre_retry_certification == ""
+    assert result.certification == "READY"
+
+
+async def test_retry_cascade_developer_only(exporter, tmp_path):
+    """Developer-only findings: only developer + QA re-run, not architect."""
+    # Manifest with findings only for developer
+    dev_only_manifest = json.dumps({
+        "certification": "NEEDS WORK",
+        "total_findings": 1,
+        "routing": {
+            "product_manager": [],
+            "architect": [],
+            "developer": [{
+                "id": "RF-1",
+                "summary": "Missing error test",
+                "detail": "Detail",
+                "affected_artifact": "code_plan",
+                "related_requirements": [{"id": "AC-1", "text": "Criterion"}],
+            }],
+        },
+    })
+
+    stub_llm = StubLLMClient(
+        responses={
+            "## Items to prioritize\n": "## Rankings\n1. Dark mode - RICE: 42",
+            "## Idea / feature to spec\n": "# PRD: Dark Mode\n## Problem\nEye strain",
+            "## Feature description\n": (
+                "## Story 1\nAs a PM, I want dark mode\n"
+                "### Acceptance Criteria\nGiven dashboard\nWhen toggle\nThen dark"
+            ),
+            "## Validation report\n": dev_only_manifest,
+            "## Compliance report\n": (
+                "# Validation Report\n## Executive Summary\nGaps.\n"
+                "## Certification\nNEEDS WORK"
+            ),
+            "## Plan structure analysis\n": (
+                "## Compliance Check\n| Feature | PASS |\n"
+                "## Summary\nTotal: 1 | Pass: 1\nOverall: NEEDS WORK"
+            ),
+            "## PRD\n": "# Tech Spec\n## Architecture\nSimple",
+            "## Technical specification\n": "## Tasks\n1. Build it",
+            "## Implementation plan\n": (
+                "### Task 1: Feature\n\n"
+                "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
+        }
+    )
+
+    config = PolicyConfig(autonomy_level=2)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+    orchestrator = PipelineOrchestrator(
+        llm=stub_llm, policy_engine=engine,
+        context={
+            "product_context": "B2B SaaS",
+            "goals_context": "Q1 goals",
+            "personas_context": "# PM\nManages projects",
+        },
+    )
+
+    await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # Architect skill (tech_spec_writer) should be called exactly once (no retry)
+    tech_spec_calls = [c for c in stub_llm.calls if c[0].startswith("## PRD\n")]
+    assert len(tech_spec_calls) == 1
+
+    # Developer skill should be called at least twice (initial + retry)
+    code_plan_calls = [c for c in stub_llm.calls if c[0].startswith("## Implementation plan\n")]
+    assert len(code_plan_calls) >= 2
+
+
+async def test_retry_cascade_pm_triggers_all_downstream(exporter, tmp_path):
+    """PM findings: PM + architect + developer + QA all re-run."""
+    pm_manifest = json.dumps({
+        "certification": "NEEDS WORK",
+        "total_findings": 1,
+        "routing": {
+            "product_manager": [{
+                "id": "RF-1",
+                "summary": "Vague acceptance criteria",
+                "detail": "Detail",
+                "affected_artifact": "user_story",
+                "related_requirements": [{"id": "AC-1", "text": "Criterion"}],
+            }],
+            "architect": [],
+            "developer": [],
+        },
+    })
+
+    stub_llm = StubLLMClient(
+        responses={
+            "## Items to prioritize\n": "## Rankings\n1. Dark mode - RICE: 42",
+            "## Idea / feature to spec\n": "# PRD: Dark Mode\n## Problem\nEye strain",
+            "## Feature description\n": (
+                "## Story 1\nAs a PM, I want dark mode\n"
+                "### Acceptance Criteria\nGiven dashboard\nWhen toggle\nThen dark"
+            ),
+            "## Validation report\n": pm_manifest,
+            "## Compliance report\n": (
+                "# Validation Report\n## Executive Summary\nGaps.\n"
+                "## Certification\nNEEDS WORK"
+            ),
+            "## Plan structure analysis\n": (
+                "## Compliance Check\n| Feature | PASS |\n"
+                "## Summary\nTotal: 1 | Pass: 1\nOverall: NEEDS WORK"
+            ),
+            "## PRD\n": "# Tech Spec\n## Architecture\nSimple",
+            "## Technical specification\n": "## Tasks\n1. Build it",
+            "## Implementation plan\n": (
+                "### Task 1: Feature\n\n"
+                "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
+        }
+    )
+
+    config = PolicyConfig(autonomy_level=2)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+    orchestrator = PipelineOrchestrator(
+        llm=stub_llm, policy_engine=engine,
+        context={
+            "product_context": "B2B SaaS",
+            "goals_context": "Q1 goals",
+            "personas_context": "# PM\nManages projects",
+        },
+    )
+
+    await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # All three content personas should be called at least twice
+    prd_calls = [c for c in stub_llm.calls if c[0].startswith("## Idea / feature to spec\n")]
+    tech_spec_calls = [c for c in stub_llm.calls if c[0].startswith("## PRD\n")]
+    code_plan_calls = [c for c in stub_llm.calls if c[0].startswith("## Implementation plan\n")]
+    assert len(prd_calls) >= 2
+    assert len(tech_spec_calls) >= 2
+    assert len(code_plan_calls) >= 2

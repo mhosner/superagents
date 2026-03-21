@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -93,6 +94,7 @@ class PipelineOrchestrator:
             context: Project-level context files (product_context, etc.).
         """
         self._context = dict(context)
+        self._retry_context: dict[str, str] = {}
         self._registry = PersonaRegistry()
         self._transport = InProcessTransport(registry=self._registry)
 
@@ -143,6 +145,7 @@ class PipelineOrchestrator:
         Returns:
             PipelineResult with all artifacts grouped by persona.
         """
+        self._retry_context = {}
         ctx = self._merge_context(context_overrides)
 
         # PM phase
@@ -152,6 +155,10 @@ class PipelineOrchestrator:
         pm_artifacts = await self._pm.run_idea_to_sprint(idea, pm_context)
         if on_phase_complete:
             on_phase_complete("pm", pm_artifacts)
+
+        # Capture user stories for retry context
+        stories_artifact = _find_artifact(pm_artifacts, "user_story")
+        self._retry_context["user_stories"] = Path(stories_artifact.path).read_text()
 
         # Find PRD artifact by type (not positional index)
         prd_artifact = _find_artifact(pm_artifacts, "prd")
@@ -207,7 +214,7 @@ class PipelineOrchestrator:
             ) if qa_artifacts else "skipped"
         )
 
-        return PipelineResult(
+        result = PipelineResult(
             artifacts=all_artifacts,
             pm=pm_artifacts,
             architect=arch_artifacts,
@@ -215,6 +222,16 @@ class PipelineOrchestrator:
             qa=qa_artifacts,
             certification=certification,
         )
+
+        # Retry pass if QA found issues
+        if certification == "NEEDS WORK":
+            result = await self._run_retry_pass(
+                result=result,
+                artifact_dir=artifact_dir,
+                on_phase_complete=on_phase_complete,
+            )
+
+        return result
 
     async def run_spec_from_prd(
         self,
@@ -242,9 +259,11 @@ class PipelineOrchestrator:
         Returns:
             PipelineResult with PM artifacts empty.
         """
+        self._retry_context = {}
         ctx = self._merge_context(context_overrides)
         prd_content = Path(prd_path).read_text()
         stories_content = Path(user_stories_path).read_text()
+        self._retry_context["user_stories"] = stories_content
 
         # Architect phase — direct call, no handoff (cold start)
         arch_dir = artifact_dir / "architect"
@@ -296,7 +315,7 @@ class PipelineOrchestrator:
             ) if qa_artifacts else "skipped"
         )
 
-        return PipelineResult(
+        result = PipelineResult(
             artifacts=all_artifacts,
             pm=[],
             architect=arch_artifacts,
@@ -304,6 +323,16 @@ class PipelineOrchestrator:
             qa=qa_artifacts,
             certification=certification,
         )
+
+        # Retry pass if QA found issues
+        if certification == "NEEDS WORK":
+            result = await self._run_retry_pass(
+                result=result,
+                artifact_dir=artifact_dir,
+                on_phase_complete=on_phase_complete,
+            )
+
+        return result
 
     async def run_plan_from_spec(  # noqa: PLR0913
         self,
@@ -333,6 +362,7 @@ class PipelineOrchestrator:
         Returns:
             PipelineResult with PM and Architect artifacts empty.
         """
+        self._retry_context = {}
         ctx = self._merge_context(context_overrides)
         plan_content = Path(implementation_plan_path).read_text()
         spec_content = Path(tech_spec_path).read_text()
@@ -349,6 +379,7 @@ class PipelineOrchestrator:
         if user_stories_path:
             dev_params["user_stories"] = Path(user_stories_path).read_text()
             dev_params["user_stories_path"] = user_stories_path
+            self._retry_context["user_stories"] = dev_params["user_stories"]
 
         # Developer phase — direct call, no handoff (cold start)
         dev_dir = artifact_dir / "developer"
@@ -380,7 +411,7 @@ class PipelineOrchestrator:
             ) if qa_artifacts else "skipped"
         )
 
-        return PipelineResult(
+        result = PipelineResult(
             artifacts=all_artifacts,
             pm=[],
             architect=[],
@@ -388,3 +419,257 @@ class PipelineOrchestrator:
             qa=qa_artifacts,
             certification=certification,
         )
+
+        # Retry pass if QA found issues
+        if certification == "NEEDS WORK":
+            result = await self._run_retry_pass(
+                result=result,
+                artifact_dir=artifact_dir,
+                on_phase_complete=on_phase_complete,
+            )
+
+        return result
+
+    # Canonical persona order for cascade logic.
+    _PERSONA_ORDER = ("product_manager", "architect", "developer")
+
+    async def _run_retry_pass(  # noqa: C901, PLR0912, PLR0915
+        self,
+        *,
+        result: PipelineResult,
+        artifact_dir: Path,
+        on_phase_complete: Callable[[str, list[Artifact]], None] | None = None,
+    ) -> PipelineResult:
+        """Re-invoke personas tagged in the routing manifest, then re-run QA.
+
+        Reads the routing manifest from the QA artifacts, determines which
+        personas need revision (including downstream cascade), injects
+        findings into context, and re-runs QA on the revised artifacts.
+
+        Note: This method mutates ``result`` in place and returns it.
+
+        Args:
+            result: The initial pipeline result (must have QA artifacts).
+            artifact_dir: Root directory for artifacts (same as initial run).
+            on_phase_complete: Optional progress callback.
+
+        Returns:
+            Updated PipelineResult with retry artifacts overwriting originals.
+        """
+        # Find routing manifest
+        manifest_artifact = None
+        for a in result.qa:
+            if a.artifact_type == "routing_manifest":
+                manifest_artifact = a
+                break
+
+        if manifest_artifact is None:
+            return result
+
+        manifest = json.loads(Path(manifest_artifact.path).read_text())
+        routing = manifest.get("routing", {})
+
+        # Determine which personas have findings
+        tagged = {
+            persona for persona in self._PERSONA_ORDER
+            if routing.get(persona)
+        }
+
+        if not tagged:
+            return result
+
+        # Determine which personas were in the initial pipeline
+        active_personas = set()
+        if result.pm:
+            active_personas.add("product_manager")
+        if result.architect:
+            active_personas.add("architect")
+        if result.developer:
+            active_personas.add("developer")
+
+        # Cascade: if any persona is tagged, all downstream also re-run
+        # but only among personas that were active in the initial pipeline
+        cascade = set()
+        triggered = False
+        for persona in self._PERSONA_ORDER:
+            if persona in tagged:
+                triggered = True
+            if triggered and persona in active_personas:
+                cascade.add(persona)
+
+        # Save pre-retry state
+        result.pre_retry_certification = result.certification
+        result.retry_attempted = True
+
+        # Collect all artifact contents for revision context.
+        def _read_artifact(artifacts: list[Artifact], atype: str) -> str:
+            for a in artifacts:
+                if a.artifact_type == atype:
+                    path = Path(a.path)
+                    if path.exists():
+                        return path.read_text()
+            return ""
+
+        # Re-invoke personas in order.
+        # Uses execute_skill() directly instead of persona workflow methods
+        # (run_spec_from_prd, run_plan_from_spec) to avoid re-triggering
+        # handoffs on retry. The retry pass manages its own context wiring.
+        if "product_manager" in cascade:
+            pm_dir = artifact_dir / "pm"
+            pm_findings = json.dumps(routing.get("product_manager", []))
+
+            # Re-run PRD
+            prd_content = _read_artifact(result.pm, "prd")
+            pm_context = SkillContext(
+                artifact_dir=pm_dir,
+                parameters={
+                    **self._context,
+                    "idea": "Revision pass",
+                    "revision_findings": pm_findings,
+                    "previous_prd": prd_content,
+                },
+                trace_id="pipeline-retry",
+            )
+            pm_prd = await self._pm.execute_skill("prd_generator", pm_context)
+
+            # Re-run user stories
+            stories_content = _read_artifact(result.pm, "user_story")
+            pm_context.parameters["previous_user_story"] = stories_content
+            pm_context.parameters["feature_description"] = Path(pm_prd.path).read_text()
+            pm_stories = await self._pm.execute_skill("user_story_writer", pm_context)
+
+            result.pm = [
+                _find_artifact(result.pm, "backlog"),
+                pm_prd,
+                pm_stories,
+            ]
+            if on_phase_complete:
+                on_phase_complete("pm", result.pm)
+
+        if "architect" in cascade:
+            arch_dir = artifact_dir / "architect"
+            arch_findings = json.dumps(routing.get("architect", []))
+            prev_spec = _read_artifact(result.architect, "tech_spec")
+            prev_plan = _read_artifact(result.architect, "implementation_plan")
+
+            # Read current upstream artifacts
+            prd_content = _read_artifact(result.pm, "prd") if result.pm else ""
+            stories_content = _read_artifact(result.pm, "user_story") if result.pm else ""
+
+            arch_context = SkillContext(
+                artifact_dir=arch_dir,
+                parameters={
+                    "prd": prd_content or self._retry_context.get("prd", ""),
+                    "user_stories": stories_content or self._retry_context.get("user_stories", ""),
+                    "product_context": self._context.get("product_context", ""),
+                    "revision_findings": arch_findings,
+                    "previous_tech_spec": prev_spec,
+                },
+                trace_id="pipeline-retry",
+            )
+            new_spec = await self._architect.execute_skill("tech_spec_writer", arch_context)
+            arch_context.parameters["tech_spec"] = Path(new_spec.path).read_text()
+            arch_context.parameters["previous_implementation_plan"] = prev_plan
+            new_plan = await self._architect.execute_skill("implementation_planner", arch_context)
+
+            result.architect = [new_spec, new_plan]
+            if on_phase_complete:
+                on_phase_complete("architect", result.architect)
+
+        if "developer" in cascade:
+            dev_dir = artifact_dir / "developer"
+            dev_findings = json.dumps(routing.get("developer", []))
+
+            prev_code = _read_artifact(result.developer, "code")
+
+            # Read current upstream artifacts
+            spec_content = (
+                _read_artifact(result.architect, "tech_spec") if result.architect else ""
+            )
+            plan_content = (
+                _read_artifact(result.architect, "implementation_plan")
+                if result.architect
+                else ""
+            )
+
+            dev_context = SkillContext(
+                artifact_dir=dev_dir,
+                parameters={
+                    "implementation_plan": plan_content,
+                    "tech_spec": spec_content,
+                    "revision_findings": dev_findings,
+                    "previous_code": prev_code,
+                },
+                trace_id="pipeline-retry",
+            )
+
+            # Forward user stories for downstream QA
+            stories_content = (
+                _read_artifact(result.pm, "user_story") if result.pm
+                else self._retry_context.get("user_stories", "")
+            )
+            if stories_content:
+                dev_context.parameters["user_stories"] = stories_content
+
+            new_code = await self._developer.execute_skill("code_planner", dev_context)
+
+            result.developer = [new_code]
+            if on_phase_complete:
+                on_phase_complete("developer", result.developer)
+
+        # Re-run QA on revised artifacts
+        qa_dir = artifact_dir / "qa"
+
+        code_content = _read_artifact(result.developer, "code")
+        spec_content = (
+            _read_artifact(result.architect, "tech_spec") if result.architect else ""
+        )
+        stories_content = _read_artifact(result.pm, "user_story") if result.pm else ""
+
+        qa_context = SkillContext(
+            artifact_dir=qa_dir,
+            parameters={
+                "code_plan": code_content,
+                "tech_spec": spec_content,
+                "user_stories": (
+                    stories_content
+                    or self._retry_context.get("user_stories", "")
+                ),
+            },
+            trace_id="pipeline-retry",
+        )
+
+        # Add optional context
+        plan_content = (
+            _read_artifact(result.architect, "implementation_plan")
+            if result.architect
+            else ""
+        )
+        if plan_content:
+            qa_context.parameters["implementation_plan"] = plan_content
+        prd_content = _read_artifact(result.pm, "prd") if result.pm else ""
+        if prd_content:
+            qa_context.parameters["prd"] = prd_content
+
+        qa_artifacts = await self._qa.run_validation(qa_context)
+        result.qa = qa_artifacts
+        if on_phase_complete:
+            on_phase_complete("qa", qa_artifacts)
+
+        # Update certification and rebuild artifacts list
+        certification = (
+            next(
+                (
+                    a.metadata.get("certification", "unknown")
+                    for a in qa_artifacts
+                    if a.artifact_type == "validation_report"
+                ),
+                "unknown",
+            ) if qa_artifacts else "unknown"
+        )
+        result.certification = certification
+
+        all_artifacts = result.pm + result.architect + result.developer + result.qa
+        result.artifacts = all_artifacts
+
+        return result
