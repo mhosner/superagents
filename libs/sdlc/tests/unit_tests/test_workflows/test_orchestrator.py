@@ -691,3 +691,135 @@ async def test_retry_cascade_pm_triggers_all_downstream(exporter, tmp_path):
     assert len(prd_calls) >= 2
     assert len(tech_spec_calls) >= 2
     assert len(code_plan_calls) >= 2
+
+
+# -- run_human_revision tests --
+
+
+async def test_human_revision_routes_and_retries(exporter, tmp_path):
+    """Human revision feedback is routed and triggers a retry pass."""
+    orchestrator, stub_llm = _make_orchestrator()
+
+    result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # Count architect calls before human revision
+    tech_spec_calls_before = len(
+        [c for c in stub_llm.calls if c[0].startswith("## PRD\n")]
+    )
+
+    result = await orchestrator.run_human_revision(
+        feedback="Fix the caching layer",
+        result=result,
+        artifact_dir=tmp_path,
+    )
+
+    assert result.retry_attempted is True
+
+    # Architect should have been called again (FindingsRouter routes to architect
+    # by default with the standard stub)
+    tech_spec_calls_after = len(
+        [c for c in stub_llm.calls if c[0].startswith("## PRD\n")]
+    )
+    assert tech_spec_calls_after > tech_spec_calls_before
+
+
+async def test_human_revision_developer_only(exporter, tmp_path):
+    """Human revision routed to developer only doesn't re-run architect."""
+    dev_only_manifest = json.dumps({
+        "certification": "NEEDS WORK",
+        "total_findings": 1,
+        "routing": {
+            "product_manager": [],
+            "architect": [],
+            "developer": [{
+                "id": "RF-H1",
+                "summary": "Fix caching",
+                "detail": "Detail",
+                "affected_artifact": "code_plan",
+                "related_requirements": [{"id": "AC-1", "text": "Criterion"}],
+            }],
+        },
+    })
+
+    stub_llm = StubLLMClient(
+        responses={
+            "## Items to prioritize\n": "## Rankings\n1. Dark mode - RICE: 42",
+            "## Idea / feature to spec\n": "# PRD: Dark Mode\n## Problem\nEye strain",
+            "## Feature description\n": (
+                "## Story 1\nAs a PM, I want dark mode\n"
+                "### Acceptance Criteria\nGiven dashboard\nWhen toggle\nThen dark"
+            ),
+            "## Validation report\n": dev_only_manifest,
+            "## Compliance report\n": (
+                "# Validation Report\n## Executive Summary\nGaps.\n"
+                "## Certification\nNEEDS WORK"
+            ),
+            "## Plan structure analysis\n": (
+                "## Compliance Check\n| Feature | PASS |\n"
+                "## Summary\nTotal: 1 | Pass: 1\nOverall: NEEDS WORK"
+            ),
+            "## PRD\n": "# Tech Spec\n## Architecture\nSimple",
+            "## Technical specification\n": "## Tasks\n1. Build it",
+            "## Implementation plan\n": (
+                "### Task 1: Feature\n\n"
+                "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
+        }
+    )
+
+    config = PolicyConfig(autonomy_level=2)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+    orchestrator = PipelineOrchestrator(
+        llm=stub_llm, policy_engine=engine,
+        context={
+            "product_context": "B2B SaaS",
+            "goals_context": "Q1 goals",
+            "personas_context": "# PM\nManages projects",
+        },
+    )
+
+    result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # Count architect calls after initial pipeline (includes initial + automated retry)
+    tech_spec_calls_before = len(
+        [c for c in stub_llm.calls if c[0].startswith("## PRD\n")]
+    )
+    # Count developer calls after initial pipeline
+    code_plan_calls_before = len(
+        [c for c in stub_llm.calls if c[0].startswith("## Implementation plan\n")]
+    )
+
+    result = await orchestrator.run_human_revision(
+        feedback="Fix the caching layer",
+        result=result,
+        artifact_dir=tmp_path,
+    )
+
+    tech_spec_calls_after = len(
+        [c for c in stub_llm.calls if c[0].startswith("## PRD\n")]
+    )
+    code_plan_calls_after = len(
+        [c for c in stub_llm.calls if c[0].startswith("## Implementation plan\n")]
+    )
+
+    # Architect should NOT have been called again
+    assert tech_spec_calls_after == tech_spec_calls_before
+    # Developer SHOULD have been called again
+    assert code_plan_calls_after > code_plan_calls_before
+
+
+async def test_human_revision_empty_feedback(exporter, tmp_path):
+    """Empty feedback still produces a valid pseudo report and runs without error."""
+    orchestrator, _ = _make_orchestrator()
+
+    result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # Should not raise
+    result = await orchestrator.run_human_revision(
+        feedback="",
+        result=result,
+        artifact_dir=tmp_path,
+    )
+
+    assert result.retry_attempted is True

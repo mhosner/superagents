@@ -430,6 +430,78 @@ class PipelineOrchestrator:
 
         return result
 
+    async def run_human_revision(
+        self,
+        *,
+        feedback: str,
+        result: PipelineResult,
+        artifact_dir: Path,
+        on_phase_complete: Callable[[str, list[Artifact]], None] | None = None,
+    ) -> PipelineResult:
+        """Run a human-directed revision pass.
+
+        Wraps feedback into a pseudo-validation-report, runs FindingsRouter
+        to classify it to the responsible persona, then calls _run_retry_pass
+        with the routing manifest.
+
+        Note: This method mutates ``result`` in place and returns it.
+
+        Args:
+            feedback: Human revision feedback text.
+            result: Current pipeline result to revise.
+            artifact_dir: Root directory for artifacts.
+            on_phase_complete: Optional progress callback.
+
+        Returns:
+            Updated PipelineResult after revision pass.
+        """
+        pseudo_report = (
+            "## Required Fixes\n"
+            f"- RF-H1: {feedback}\n\n"
+            "## Certification\n"
+            "NEEDS WORK"
+        )
+
+        # Get user stories — try retry context first, then fall back to PM artifacts.
+        user_stories = self._retry_context.get("user_stories", "")
+        if not user_stories and result.pm:
+            for a in result.pm:
+                if a.artifact_type == "user_story":
+                    path = Path(a.path)
+                    if path.exists():
+                        user_stories = path.read_text()
+                    break
+
+        # Build SkillContext for FindingsRouter
+        qa_dir = artifact_dir / "qa"
+        qa_dir.mkdir(parents=True, exist_ok=True)
+        context = SkillContext(
+            artifact_dir=qa_dir,
+            parameters={
+                "validation_report": pseudo_report,
+                "user_stories": user_stories,
+            },
+            trace_id="pipeline-human-revision",
+        )
+
+        # Route the human feedback to the responsible persona(s)
+        routing_artifact = await self._qa.execute_skill("findings_router", context)
+
+        # Inject the routing manifest into result.qa so _run_retry_pass can find
+        # and read it. After _run_retry_pass re-runs QA, result.qa is overwritten
+        # with fresh QA output (which includes a new manifest from the automated
+        # QA pass). The injected manifest is consumed then replaced — this is
+        # intentional, not dead code.
+        result.qa = [
+            a for a in result.qa if a.artifact_type != "routing_manifest"
+        ] + [routing_artifact]
+
+        return await self._run_retry_pass(
+            result=result,
+            artifact_dir=artifact_dir,
+            on_phase_complete=on_phase_complete,
+        )
+
     # Canonical persona order for cascade logic.
     _PERSONA_ORDER = ("product_manager", "architect", "developer")
 
