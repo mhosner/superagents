@@ -10,6 +10,7 @@ from superagents.telemetry import persona_span
 
 from superagents_sdlc.personas.base import BasePersona
 from superagents_sdlc.skills.base import SkillValidationError
+from superagents_sdlc.skills.qa.findings_router import FindingsRouter
 from superagents_sdlc.skills.qa.spec_compliance_checker import SpecComplianceChecker
 from superagents_sdlc.skills.qa.validation_report_generator import (
     ValidationReportGenerator,
@@ -47,6 +48,7 @@ class QAPersona(BasePersona):
         skills = {
             "spec_compliance_checker": SpecComplianceChecker(llm=llm),
             "validation_report_generator": ValidationReportGenerator(llm=llm),
+            "findings_router": FindingsRouter(llm=llm),
         }
         super().__init__(
             name="qa",
@@ -72,13 +74,15 @@ class QAPersona(BasePersona):
     async def run_validation(self, context: SkillContext) -> list[Artifact]:
         """Run the validation workflow.
 
-        Linear pipeline: compliance check -> validation report.
+        Linear pipeline: compliance check -> validation report -> (optional)
+        findings router when certification is NEEDS WORK.
 
         Args:
             context: Execution context with code_plan, user_stories, tech_spec.
 
         Returns:
-            List of two artifacts: [compliance_report, validation_report].
+            List of artifacts: [compliance_report, validation_report] or
+            [compliance_report, validation_report, routing_manifest].
 
         Raises:
             SkillValidationError: If required context keys are missing.
@@ -100,8 +104,18 @@ class QAPersona(BasePersona):
 
             # Step 2: Generate validation report
             validation_artifact = await self.execute_skill("validation_report_generator", context)
+            validation_content = Path(validation_artifact.path).read_text()
 
-        return [compliance_artifact, validation_artifact]
+            artifacts = [compliance_artifact, validation_artifact]
+
+            # Step 3: Route findings if NEEDS WORK
+            certification = validation_artifact.metadata.get("certification", "unknown")
+            if certification == "NEEDS WORK":
+                context.parameters["validation_report"] = validation_content
+                routing_artifact = await self.execute_skill("findings_router", context)
+                artifacts.append(routing_artifact)
+
+        return artifacts
 
     async def handle_handoff(
         self, handoff: PersonaHandoff, context: SkillContext
