@@ -176,9 +176,7 @@ def test_json_output(tmp_path):
     assert "architect" in data
     assert "developer" in data
     assert "qa" in data
-    assert "retry_attempted" in data
-    assert "pre_retry_certification" in data
-    assert len(data["artifacts"]) == 9
+    assert len(data["artifacts"]) == 9  # includes routing_manifest
 
 
 def test_error_exit_code(tmp_path):
@@ -203,3 +201,110 @@ def test_error_exit_code(tmp_path):
 
     assert result.returncode == 1
     assert "Error" in result.stderr
+
+
+def test_parse_interactive_flag():
+    parser = _build_parser()
+    args = parser.parse_args(
+        [
+            "idea-to-code",
+            "Test",
+            "--output-dir",
+            "/tmp/out",
+            "-i",
+        ]
+    )
+    assert args.interactive is True
+
+
+def test_interactive_quiet_mutually_exclusive():
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "idea-to-code",
+                "Test",
+                "--output-dir",
+                "/tmp/out",
+                "-i",
+                "--quiet",
+            ]
+        )
+
+
+def test_interactive_approve(tmp_path):
+    output_dir = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+            "-i",
+        ],
+        input="a\n",
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "Approved" in result.stdout
+    assert (output_dir / "pipeline_narrative.md").exists()
+
+
+def test_interactive_revise_then_approve(tmp_path):
+    output_dir = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+            "-i",
+        ],
+        input="r\nFix the caching layer\n\na\n",
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    narrative = (output_dir / "pipeline_narrative.md").read_text()
+    assert "Human Feedback" in narrative
+    assert "Fix the caching layer" in narrative
+
+
+def test_interactive_quit(tmp_path):
+    output_dir = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+            "-i",
+        ],
+        input="q\n",
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "Quit" in result.stdout or "Certification" in result.stdout

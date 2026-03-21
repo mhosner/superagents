@@ -13,6 +13,8 @@ from superagents_sdlc.skills.llm import LLMClient, StubLLMClient
 
 if TYPE_CHECKING:
     from superagents_sdlc.skills.base import Artifact
+    from superagents_sdlc.workflows.narrative import NarrativeWriter
+    from superagents_sdlc.workflows.orchestrator import PipelineOrchestrator
     from superagents_sdlc.workflows.result import PipelineResult
 
 # Named context files recognized by the loader.
@@ -79,6 +81,12 @@ def _build_parser() -> argparse.ArgumentParser:
     verbosity = shared.add_mutually_exclusive_group()
     verbosity.add_argument(
         "--quiet", action="store_true", help="Suppress all output except errors."
+    )
+    verbosity.add_argument(
+        "--interactive",
+        "-i",
+        action="store_true",
+        help="Enable interactive review loop.",
     )
     shared.add_argument(
         "--json",
@@ -213,8 +221,6 @@ def _serialize_result(result: PipelineResult) -> str:
 
     data = {
         "certification": result.certification,
-        "retry_attempted": result.retry_attempted,
-        "pre_retry_certification": result.pre_retry_certification,
         "artifacts": _dump_artifacts(result.artifacts),
         "pm": _dump_artifacts(result.pm),
         "architect": _dump_artifacts(result.architect),
@@ -222,6 +228,148 @@ def _serialize_result(result: PipelineResult) -> str:
         "qa": _dump_artifacts(result.qa),
     }
     return json.dumps(data, indent=2)
+
+
+def _make_phase_callback(
+    *,
+    quiet: bool,
+    narrative: NarrativeWriter,
+    seen_phases: list[str],
+    retry_state: dict[str, bool],
+) -> callable:
+    """Build the on_phase callback used by pipeline runs.
+
+    Args:
+        quiet: Whether to suppress stdout output.
+        narrative: NarrativeWriter instance.
+        seen_phases: Mutable list tracking phase names already seen.
+        retry_state: Mutable dict with a "started" key for retry tracking.
+
+    Returns:
+        Callback function for on_phase_complete.
+    """
+    def on_phase(name: str, artifacts: list[Artifact]) -> None:
+        # Detect automated retry: a repeated phase name means retry started
+        if name in seen_phases and not retry_state["started"]:
+            retry_state["started"] = True
+            narrative.start_pass(2, "Automated Retry")
+        seen_phases.append(name)
+
+        if not quiet:
+            count = len(artifacts)
+            label = "artifact" if count == 1 else "artifacts"
+            print(f"{name.upper()} phase... done ({count} {label})")  # noqa: T201
+
+        # Extract certification and findings for QA phases
+        certification = ""
+        findings: list[str] | None = None
+        if name == "qa":
+            for a in artifacts:
+                if a.artifact_type == "validation_report":
+                    certification = a.metadata.get("certification", "")
+                elif a.artifact_type == "routing_manifest":
+                    _extract_findings(a, findings)
+
+        narrative.record_phase(
+            name, artifacts, certification=certification, findings_summary=findings
+        )
+
+    return on_phase
+
+
+def _extract_findings(artifact: Artifact, findings: list[str] | None) -> list[str] | None:
+    """Extract findings from a routing manifest artifact.
+
+    Args:
+        artifact: Routing manifest artifact.
+        findings: Existing findings list (mutated in place), or None.
+
+    Returns:
+        Updated findings list, or None if extraction failed.
+    """
+    try:
+        manifest = json.loads(Path(artifact.path).read_text())
+    except (json.JSONDecodeError, KeyError):
+        return findings
+    else:
+        result = findings if findings is not None else []
+        for _persona, items in manifest.get("routing", {}).items():
+            for item in items:
+                result.append(f"{item['id']}: {item['summary']} [{_persona}]")
+        return result
+
+
+async def _async_input(prompt: str = "") -> str:
+    """Read a line from stdin without blocking the event loop.
+
+    Args:
+        prompt: Optional prompt string.
+
+    Returns:
+        The stripped input line.
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: input(prompt))
+
+
+async def _interactive_loop(
+    *,
+    result: PipelineResult,
+    orchestrator: PipelineOrchestrator,
+    narrative: NarrativeWriter,
+    output_dir: Path,
+    on_phase: callable,
+) -> None:
+    """Run the interactive approve/revise/quit loop.
+
+    Args:
+        result: Initial pipeline result.
+        orchestrator: Pipeline orchestrator for revisions.
+        narrative: NarrativeWriter for recording feedback.
+        output_dir: Artifact output directory.
+        on_phase: Phase callback for revision runs.
+    """
+    pass_number = 2 if result.retry_attempted else 1
+
+    while True:
+        print(f"\nCertification: {result.certification}")  # noqa: T201
+        print(f"\nNarrative: {output_dir}/pipeline_narrative.md")  # noqa: T201
+        print(f"Artifacts: {output_dir}/")  # noqa: T201
+
+        choice = (await _async_input("\napprove / revise / quit (a/r/q)> ")).strip().lower()
+
+        if choice in ("a", "approve"):
+            narrative.record_final_result(result.certification, pass_number)
+            print("Approved. Final artifacts written.")  # noqa: T201
+            break
+        if choice in ("q", "quit"):
+            narrative.record_final_result(result.certification, pass_number)
+            print(f"Quit. Certification: {result.certification}")  # noqa: T201
+            break
+        if choice in ("r", "revise"):
+            print("Enter feedback (empty line to finish):")  # noqa: T201
+            lines: list[str] = []
+            while True:
+                line = await _async_input()
+                if not line:
+                    break
+                lines.append(line)
+            feedback = "\n".join(lines)
+
+            if feedback:
+                narrative.record_human_feedback(feedback)
+                pass_number += 1
+                narrative.start_pass(pass_number, "Human Revision")
+                result = await orchestrator.run_human_revision(
+                    feedback=feedback,
+                    result=result,
+                    artifact_dir=output_dir,
+                    on_phase_complete=on_phase,
+                )
+            else:
+                print("No feedback provided. Try again.")  # noqa: T201
+        else:
+            print("Invalid choice. Enter a, r, or q.")  # noqa: T201
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -236,6 +384,7 @@ async def _run(args: argparse.Namespace) -> int:
     from superagents_sdlc.policy.config import PolicyConfig  # noqa: PLC0415
     from superagents_sdlc.policy.engine import PolicyEngine  # noqa: PLC0415
     from superagents_sdlc.policy.gates import AutoApprovalGate  # noqa: PLC0415
+    from superagents_sdlc.workflows.narrative import NarrativeWriter  # noqa: PLC0415
     from superagents_sdlc.workflows.orchestrator import PipelineOrchestrator  # noqa: PLC0415
 
     # Load context; provide empty defaults so PM skills pass validation.
@@ -262,35 +411,35 @@ async def _run(args: argparse.Namespace) -> int:
 
     orchestrator = PipelineOrchestrator(llm=llm, policy_engine=engine, context=context)
 
-    # Phase progress callback
-    def on_phase(name: str, artifacts: list[Artifact]) -> None:
-        if not args.quiet:
-            count = len(artifacts)
-            label = "artifact" if count == 1 else "artifacts"
-            print(f"{name.upper()} phase... done ({count} {label})")  # noqa: T201
+    # Set up narrative writer
+    narrative = NarrativeWriter(
+        output_dir, f'{args.command} "{getattr(args, "idea", "pipeline")}"'
+    )
+    narrative.start_pass(1, "Initial Run")
+
+    # Build phase callback
+    seen_phases: list[str] = []
+    retry_state: dict[str, bool] = {"started": False}
+    on_phase = _make_phase_callback(
+        quiet=args.quiet, narrative=narrative,
+        seen_phases=seen_phases, retry_state=retry_state,
+    )
 
     # Run the appropriate pipeline
-    if args.command == "idea-to-code":
-        result = await orchestrator.run_idea_to_code(
-            args.idea,
-            artifact_dir=output_dir,
-            on_phase_complete=on_phase,
+    result = await _run_pipeline(args, orchestrator, output_dir, on_phase)
+
+    # Interactive review loop or finalize
+    if args.interactive:
+        await _interactive_loop(
+            result=result,
+            orchestrator=orchestrator,
+            narrative=narrative,
+            output_dir=output_dir,
+            on_phase=on_phase,
         )
-    elif args.command == "spec-from-prd":
-        result = await orchestrator.run_spec_from_prd(
-            args.prd_path,
-            user_stories_path=args.user_stories,
-            artifact_dir=output_dir,
-            on_phase_complete=on_phase,
-        )
-    else:  # plan-from-spec
-        result = await orchestrator.run_plan_from_spec(
-            implementation_plan_path=args.plan,
-            tech_spec_path=args.spec,
-            artifact_dir=output_dir,
-            user_stories_path=args.user_stories,
-            on_phase_complete=on_phase,
-        )
+    else:
+        pass_number = 2 if result.retry_attempted else 1
+        narrative.record_final_result(result.certification, pass_number)
 
     # Output
     if not args.quiet:
@@ -301,6 +450,46 @@ async def _run(args: argparse.Namespace) -> int:
         print(_serialize_result(result))  # noqa: T201
 
     return 0
+
+
+async def _run_pipeline(
+    args: argparse.Namespace,
+    orchestrator: PipelineOrchestrator,
+    output_dir: Path,
+    on_phase: callable,
+) -> PipelineResult:
+    """Dispatch to the appropriate pipeline method.
+
+    Args:
+        args: Parsed CLI arguments.
+        orchestrator: Pipeline orchestrator.
+        output_dir: Artifact output directory.
+        on_phase: Phase completion callback.
+
+    Returns:
+        Pipeline result.
+    """
+    if args.command == "idea-to-code":
+        return await orchestrator.run_idea_to_code(
+            args.idea,
+            artifact_dir=output_dir,
+            on_phase_complete=on_phase,
+        )
+    if args.command == "spec-from-prd":
+        return await orchestrator.run_spec_from_prd(
+            args.prd_path,
+            user_stories_path=args.user_stories,
+            artifact_dir=output_dir,
+            on_phase_complete=on_phase,
+        )
+    # plan-from-spec
+    return await orchestrator.run_plan_from_spec(
+        implementation_plan_path=args.plan,
+        tech_spec_path=args.spec,
+        artifact_dir=output_dir,
+        user_stories_path=args.user_stories,
+        on_phase_complete=on_phase,
+    )
 
 
 def main() -> None:
