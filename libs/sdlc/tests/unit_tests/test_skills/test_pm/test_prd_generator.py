@@ -78,3 +78,25 @@ async def test_prd_execute_returns_correct_artifact_type(tmp_path):
 
     assert artifact.artifact_type == "prd"
     assert "idea" in artifact.metadata
+
+
+async def test_prd_includes_revision_findings_in_prompt(tmp_path):
+    stub = _make_stub()
+    skill = PrdGenerator(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["revision_findings"] = '[{"id":"RF-1","summary":"Vague AC"}]'
+    context.parameters["previous_prd"] = "# Old PRD\nVague requirements"
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "## Previous PRD" in prompt
+    assert "Vague requirements" in prompt
+    assert "## Revision findings" in prompt
+    assert "Vague AC" in prompt
+    # Both come after the core context (idea, product roadmap, etc.)
+    prev_idx = prompt.index("## Previous PRD")
+    findings_idx = prompt.index("## Revision findings")
+    idea_idx = prompt.index("## Idea / feature to spec")
+    assert idea_idx < prev_idx
+    assert prev_idx < findings_idx

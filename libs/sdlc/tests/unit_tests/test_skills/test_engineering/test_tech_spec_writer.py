@@ -78,3 +78,25 @@ async def test_spec_execute_returns_correct_metadata(tmp_path):
     artifact = await skill.execute(context)
 
     assert "prd_idea" in artifact.metadata
+
+
+async def test_tech_spec_includes_revision_findings_in_prompt(tmp_path):
+    stub = _make_stub()
+    skill = TechSpecWriter(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["revision_findings"] = '[{"id":"RF-1","summary":"Add caching"}]'
+    context.parameters["previous_tech_spec"] = "# Old Spec\nNo caching mentioned"
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "## Previous tech_spec" in prompt
+    assert "No caching mentioned" in prompt
+    assert "## Revision findings" in prompt
+    assert "Add caching" in prompt
+    # Both come after the core context (PRD, user stories, product context)
+    prev_idx = prompt.index("## Previous tech_spec")
+    findings_idx = prompt.index("## Revision findings")
+    prd_idx = prompt.index("## PRD")
+    assert prd_idx < prev_idx
+    assert prev_idx < findings_idx

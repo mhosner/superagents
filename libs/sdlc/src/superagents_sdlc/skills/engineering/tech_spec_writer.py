@@ -89,6 +89,11 @@ class TechSpecWriter(BaseSkill):
         if "priority_output" in params:
             prompt_parts.append(f"## Priority ranking\n{params['priority_output']}")
 
+        if "previous_tech_spec" in params:
+            prompt_parts.append(f"## Previous tech_spec\n{params['previous_tech_spec']}")
+        if "revision_findings" in params:
+            prompt_parts.append(f"## Revision findings\n{params['revision_findings']}")
+
         prompt = "\n\n".join(prompt_parts)
         response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
 

@@ -113,6 +113,11 @@ class UserStoryWriter(BaseSkill):
         if "product_context" in params:
             prompt_parts.append(f"## Product roadmap context\n{params['product_context']}")
 
+        if "previous_user_story" in params:
+            prompt_parts.append(f"## Previous user stories\n{params['previous_user_story']}")
+        if "revision_findings" in params:
+            prompt_parts.append(f"## Revision findings\n{params['revision_findings']}")
+
         prompt = "\n\n".join(prompt_parts)
         response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
 

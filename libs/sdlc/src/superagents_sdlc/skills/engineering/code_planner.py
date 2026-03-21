@@ -133,6 +133,11 @@ class CodePlanner(BaseSkill):
         if "prd" in params:
             prompt_parts.append(f"## PRD\n{params['prd']}")
 
+        if "previous_code" in params:
+            prompt_parts.append(f"## Previous code plan\n{params['previous_code']}")
+        if "revision_findings" in params:
+            prompt_parts.append(f"## Revision findings\n{params['revision_findings']}")
+
         prompt = "\n\n".join(prompt_parts)
         response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
 

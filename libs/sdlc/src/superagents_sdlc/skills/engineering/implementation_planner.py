@@ -90,6 +90,12 @@ class ImplementationPlanner(BaseSkill):
         if "product_context" in params:
             prompt_parts.append(f"## Product context\n{params['product_context']}")
 
+        if "previous_implementation_plan" in params:
+            prev = params["previous_implementation_plan"]
+            prompt_parts.append(f"## Previous implementation plan\n{prev}")
+        if "revision_findings" in params:
+            prompt_parts.append(f"## Revision findings\n{params['revision_findings']}")
+
         prompt = "\n\n".join(prompt_parts)
         response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
 

@@ -108,3 +108,25 @@ async def test_code_planner_output_parseable_as_plan(tmp_path):
     assert tasks[0].name == "Create DarkModeToggle"
     assert tasks[0].has_run_command is True
     assert tasks[0].checkboxes == 4
+
+
+async def test_code_planner_includes_revision_findings_in_prompt(tmp_path):
+    stub = _make_stub()
+    skill = CodePlanner(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["revision_findings"] = '[{"id":"RF-2","summary":"Missing error test"}]'
+    context.parameters["previous_code"] = "### Task 1: Old code plan"
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "## Previous code plan" in prompt
+    assert "Old code plan" in prompt
+    assert "## Revision findings" in prompt
+    assert "Missing error test" in prompt
+    # Both come after the core context (implementation plan, tech spec)
+    prev_idx = prompt.index("## Previous code plan")
+    findings_idx = prompt.index("## Revision findings")
+    plan_idx = prompt.index("## Implementation plan")
+    assert plan_idx < prev_idx
+    assert prev_idx < findings_idx
