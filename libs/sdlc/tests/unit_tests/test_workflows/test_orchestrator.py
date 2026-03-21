@@ -432,3 +432,17 @@ async def test_orchestrator_asserts_handoff_source(exporter, tmp_path):
 
     with pytest.raises(RuntimeError, match="Expected handoff from 'product_manager'"):
         _get_handoff(orchestrator._architect, "product_manager")
+
+
+# -- retry field tests --
+
+
+async def test_idea_to_code_result_has_retry_fields(exporter, tmp_path):
+    orchestrator, _ = _make_orchestrator()
+
+    result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    assert hasattr(result, "retry_attempted")
+    assert hasattr(result, "pre_retry_certification")
+    assert isinstance(result.retry_attempted, bool)
+    assert isinstance(result.pre_retry_certification, str)

@@ -31,3 +31,5 @@ class PipelineResult:
     developer: list[Artifact] = field(default_factory=list)
     qa: list[Artifact] = field(default_factory=list)
     certification: str = "skipped"
+    retry_attempted: bool = False
+    pre_retry_certification: str = ""

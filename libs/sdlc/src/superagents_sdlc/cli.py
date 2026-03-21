@@ -213,6 +213,8 @@ def _serialize_result(result: PipelineResult) -> str:
 
     data = {
         "certification": result.certification,
+        "retry_attempted": result.retry_attempted,
+        "pre_retry_certification": result.pre_retry_certification,
         "artifacts": _dump_artifacts(result.artifacts),
         "pm": _dump_artifacts(result.pm),
         "architect": _dump_artifacts(result.architect),
