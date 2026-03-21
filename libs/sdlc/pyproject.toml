@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-anthropic = ["anthropic>=0.40.0"]
+anthropic = ["anthropic>=0.40.0", "python-dotenv>=1.0.0"]
 
 [project.scripts]
 superagents-sdlc = "superagents_sdlc.cli:main"

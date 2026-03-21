@@ -494,6 +494,13 @@ async def _run_pipeline(
 
 def main() -> None:
     """CLI entry point."""
+    try:
+        from dotenv import load_dotenv  # noqa: PLC0415
+
+        load_dotenv()
+    except ImportError:
+        pass
+
     parser = _build_parser()
     args = parser.parse_args()
 
