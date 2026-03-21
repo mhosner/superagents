@@ -171,6 +171,22 @@ def _stub_responses() -> dict[str, str]:
             "## Compliance Check\n| Feature | PASS |\n"
             "## Summary\nTotal: 1 | Pass: 1\nOverall: NEEDS WORK"
         ),
+        # FindingsRouter — must come before other keys containing "## Validation report"
+        "## Validation report\n": json.dumps({
+            "certification": "NEEDS WORK",
+            "total_findings": 1,
+            "routing": {
+                "product_manager": [],
+                "architect": [{
+                    "id": "RF-1",
+                    "summary": "Minor spec gap",
+                    "detail": "Detail text",
+                    "affected_artifact": "tech_spec",
+                    "related_requirements": [{"id": "AC-1", "text": "Criterion"}],
+                }],
+                "developer": [],
+            },
+        }),
         # Architect skills
         "## PRD\n": "# Tech Spec\n## Architecture\nSimple",
         "## Technical specification\n": "## Tasks\n1. Build it",

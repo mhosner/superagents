@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,6 +24,23 @@ if TYPE_CHECKING:
 def _make_stub_llm() -> StubLLMClient:
     return StubLLMClient(
         responses={
+            # FindingsRouter — must come before "## Code plan" because the
+            # FindingsRouter prompt also contains "## Code plan"
+            "## Validation report\n": json.dumps({
+                "certification": "NEEDS WORK",
+                "total_findings": 1,
+                "routing": {
+                    "product_manager": [],
+                    "architect": [{
+                        "id": "RF-1",
+                        "summary": "Minor spec gap",
+                        "detail": "Detail text",
+                        "affected_artifact": "tech_spec",
+                        "related_requirements": [{"id": "AC-1", "text": "Criterion"}],
+                    }],
+                    "developer": [],
+                },
+            }),
             "## Code plan\n": (
                 "## Compliance Check\n"
                 "| Dark mode toggle | PASS |\n"
@@ -67,11 +85,12 @@ def _make_context(tmp_path: Path) -> SkillContext:
     )
 
 
-def test_qa_has_two_skills(tmp_path):
+def test_qa_has_three_skills(tmp_path):
     qa, _ = _make_qa(tmp_path)
     assert "spec_compliance_checker" in qa.skills
     assert "validation_report_generator" in qa.skills
-    assert len(qa.skills) == 2
+    assert "findings_router" in qa.skills
+    assert len(qa.skills) == 3
 
 
 async def test_qa_receive_handoff_stores(exporter, tmp_path):
@@ -92,27 +111,29 @@ async def test_qa_receive_handoff_stores(exporter, tmp_path):
     assert qa.received[0].source_persona == "developer"
 
 
-async def test_qa_workflow_runs_two_skills_in_order(exporter, tmp_path):
+async def test_qa_workflow_runs_three_skills_in_order(exporter, tmp_path):
     qa, stub_llm = _make_qa(tmp_path)
     context = _make_context(tmp_path)
 
     await qa.run_validation(context)
 
     prompts = [call[0] for call in stub_llm.calls]
-    assert len(prompts) == 2
+    assert len(prompts) == 3
     assert "## Code plan\n" in prompts[0]
     assert "## Compliance report\n" in prompts[1]
+    assert "## Validation report\n" in prompts[2]
 
 
-async def test_qa_workflow_returns_two_artifacts(exporter, tmp_path):
+async def test_qa_workflow_returns_three_artifacts(exporter, tmp_path):
     qa, _ = _make_qa(tmp_path)
     context = _make_context(tmp_path)
 
     artifacts = await qa.run_validation(context)
 
-    assert len(artifacts) == 2
+    assert len(artifacts) == 3
     assert artifacts[0].artifact_type == "compliance_report"
     assert artifacts[1].artifact_type == "validation_report"
+    assert artifacts[2].artifact_type == "routing_manifest"
 
 
 async def test_qa_workflow_emits_persona_span(exporter, tmp_path):
@@ -180,4 +201,4 @@ async def test_qa_handle_handoff_without_user_stories_path(exporter, tmp_path):
     )
 
     artifacts = await qa.handle_handoff(handoff, context)
-    assert len(artifacts) == 2
+    assert len(artifacts) == 3

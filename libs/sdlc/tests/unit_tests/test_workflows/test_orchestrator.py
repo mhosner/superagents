@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from superagents_sdlc.handoffs.contract import PersonaHandoff
@@ -43,6 +45,22 @@ def _make_pipeline_llm() -> StubLLMClient:
                 "## Summary\nTotal: 1 | Pass: 1\n"
                 "Overall: NEEDS WORK"
             ),
+            # FindingsRouter — must come before other keys containing "## Validation report"
+            "## Validation report\n": json.dumps({
+                "certification": "NEEDS WORK",
+                "total_findings": 1,
+                "routing": {
+                    "product_manager": [],
+                    "architect": [{
+                        "id": "RF-1",
+                        "summary": "Minor spec gap",
+                        "detail": "Detail text",
+                        "affected_artifact": "tech_spec",
+                        "related_requirements": [{"id": "AC-1", "text": "Criterion"}],
+                    }],
+                    "developer": [],
+                },
+            }),
             # Architect skills
             "## PRD\n": "# Tech Spec\n## Architecture\nMicroservices with REST API",
             "## Technical specification\n": ("## Tasks\n1. Create model\n2. Build API\n3. Add UI"),
@@ -82,7 +100,7 @@ async def test_idea_to_code_returns_eight_artifacts(exporter, tmp_path):
 
     result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
 
-    assert len(result.artifacts) == 8
+    assert len(result.artifacts) == 9
     types = [a.artifact_type for a in result.artifacts]
     assert types == [
         "backlog",
@@ -93,6 +111,7 @@ async def test_idea_to_code_returns_eight_artifacts(exporter, tmp_path):
         "code",
         "compliance_report",
         "validation_report",
+        "routing_manifest",
     ]
 
 
@@ -152,7 +171,7 @@ async def test_idea_to_code_per_persona_grouping(exporter, tmp_path):
     assert len(result.pm) == 3
     assert len(result.architect) == 2
     assert len(result.developer) == 1
-    assert len(result.qa) == 2
+    assert len(result.qa) == 3
 
 
 # -- run_spec_from_prd tests --
@@ -176,7 +195,7 @@ async def test_spec_from_prd_skips_pm(exporter, tmp_path):
     assert result.pm == []
     assert len(result.architect) == 2
     assert len(result.developer) == 1
-    assert len(result.qa) == 2
+    assert len(result.qa) == 3
 
 
 async def test_spec_from_prd_returns_five_artifacts(exporter, tmp_path):
@@ -194,7 +213,7 @@ async def test_spec_from_prd_returns_five_artifacts(exporter, tmp_path):
         artifact_dir=tmp_path / "output",
     )
 
-    assert len(result.artifacts) == 5
+    assert len(result.artifacts) == 6
     types = [a.artifact_type for a in result.artifacts]
     assert types == [
         "tech_spec",
@@ -202,6 +221,7 @@ async def test_spec_from_prd_returns_five_artifacts(exporter, tmp_path):
         "code",
         "compliance_report",
         "validation_report",
+        "routing_manifest",
     ]
 
 
@@ -255,7 +275,7 @@ async def test_plan_from_spec_skips_pm_and_architect(exporter, tmp_path):
     assert result.pm == []
     assert result.architect == []
     assert len(result.developer) == 1
-    assert len(result.qa) == 2
+    assert len(result.qa) == 3
 
 
 async def test_plan_from_spec_returns_three_artifacts(exporter, tmp_path):
@@ -277,9 +297,9 @@ async def test_plan_from_spec_returns_three_artifacts(exporter, tmp_path):
         artifact_dir=tmp_path / "output",
     )
 
-    assert len(result.artifacts) == 3
+    assert len(result.artifacts) == 4
     types = [a.artifact_type for a in result.artifacts]
-    assert types == ["code", "compliance_report", "validation_report"]
+    assert types == ["code", "compliance_report", "validation_report", "routing_manifest"]
 
 
 async def test_plan_from_spec_with_user_stories(exporter, tmp_path):
@@ -301,7 +321,7 @@ async def test_plan_from_spec_with_user_stories(exporter, tmp_path):
         artifact_dir=tmp_path / "output",
     )
 
-    assert len(result.qa) == 2
+    assert len(result.qa) == 3
     assert result.certification != "skipped"
 
 
@@ -336,7 +356,7 @@ async def test_idea_to_code_calls_phase_callback(exporter, tmp_path):
         "Add dark mode", artifact_dir=tmp_path, on_phase_complete=on_phase
     )
 
-    assert phases == [("pm", 3), ("architect", 2), ("developer", 1), ("qa", 2)]
+    assert phases == [("pm", 3), ("architect", 2), ("developer", 1), ("qa", 3)]
 
 
 async def test_spec_from_prd_calls_phase_callback(exporter, tmp_path):
@@ -359,7 +379,7 @@ async def test_spec_from_prd_calls_phase_callback(exporter, tmp_path):
         on_phase_complete=on_phase,
     )
 
-    assert phases == [("architect", 2), ("developer", 1), ("qa", 2)]
+    assert phases == [("architect", 2), ("developer", 1), ("qa", 3)]
 
 
 async def test_plan_from_spec_calls_phase_callback(exporter, tmp_path):
@@ -386,7 +406,7 @@ async def test_plan_from_spec_calls_phase_callback(exporter, tmp_path):
         on_phase_complete=on_phase,
     )
 
-    assert phases == [("developer", 1), ("qa", 2)]
+    assert phases == [("developer", 1), ("qa", 3)]
 
 
 # -- handoff assertion test --

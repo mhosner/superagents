@@ -176,7 +176,7 @@ def test_json_output(tmp_path):
     assert "architect" in data
     assert "developer" in data
     assert "qa" in data
-    assert len(data["artifacts"]) == 8
+    assert len(data["artifacts"]) == 9
 
 
 def test_error_exit_code(tmp_path):

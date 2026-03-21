@@ -197,7 +197,14 @@ class PipelineOrchestrator:
         # Build result
         all_artifacts = pm_artifacts + arch_artifacts + dev_artifacts + qa_artifacts
         certification = (
-            qa_artifacts[-1].metadata.get("certification", "unknown") if qa_artifacts else "skipped"
+            next(
+                (
+                    a.metadata.get("certification", "unknown")
+                    for a in qa_artifacts
+                    if a.artifact_type == "validation_report"
+                ),
+                "unknown",
+            ) if qa_artifacts else "skipped"
         )
 
         return PipelineResult(
@@ -279,7 +286,14 @@ class PipelineOrchestrator:
 
         all_artifacts = arch_artifacts + dev_artifacts + qa_artifacts
         certification = (
-            qa_artifacts[-1].metadata.get("certification", "unknown") if qa_artifacts else "skipped"
+            next(
+                (
+                    a.metadata.get("certification", "unknown")
+                    for a in qa_artifacts
+                    if a.artifact_type == "validation_report"
+                ),
+                "unknown",
+            ) if qa_artifacts else "skipped"
         )
 
         return PipelineResult(
@@ -356,7 +370,14 @@ class PipelineOrchestrator:
 
         all_artifacts = dev_artifacts + qa_artifacts
         certification = (
-            qa_artifacts[-1].metadata.get("certification", "unknown") if qa_artifacts else "skipped"
+            next(
+                (
+                    a.metadata.get("certification", "unknown")
+                    for a in qa_artifacts
+                    if a.artifact_type == "validation_report"
+                ),
+                "unknown",
+            ) if qa_artifacts else "skipped"
         )
 
         return PipelineResult(
