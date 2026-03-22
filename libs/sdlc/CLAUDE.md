@@ -153,43 +153,47 @@ This project follows the Superpowers methodology:
 
 ## Tech stack
 
-- **Runtime**: Python 3.12+, Deep Agents SDK
+- **Runtime**: Python 3.12+
 - **Package management**: uv
-- **Testing**: pytest (asyncio_mode = "auto")
+- **Testing**: pytest (asyncio_mode = "auto" — do NOT add `@pytest.mark.asyncio`)
 - **Linting**: ruff
 - **Type checking**: ty
-- **Telemetry**: opentelemetry-api, opentelemetry-sdk
-- **Agent communication**: a2a-sdk (A2A Python SDK)
+- **Telemetry**: opentelemetry-api, opentelemetry-sdk (via superagents SDK)
+- **LLM**: Anthropic API via `AnthropicLLMClient` (optional extra)
+- **Brainstorm**: LangGraph StateGraph with `interrupt()` for HITL
 - **CI**: GitHub Actions
 
-## Project structure (target)
+## Project structure (current)
 
 ```
 libs/superagents/                    # SDK (extended from upstream Deep Agents)
 ├── superagents/
-│   └── telemetry/                   # Phase 1: OpenTelemetry instrumentation
+│   └── telemetry/                   # OpenTelemetry instrumentation
 │       ├── __init__.py              # Public API re-exports
 │       ├── provider.py              # TracerProvider lifecycle
 │       └── spans.py                 # Four span context managers
 └── tests/unit_tests/test_telemetry/
 
-libs/sdlc/                           # SDLC integration package (depends on superagents)
+libs/sdlc/                           # SDLC integration package
 ├── pyproject.toml
 ├── src/superagents_sdlc/
-│   ├── skills/                      # Skill contract
-│   │   └── base.py                  # BaseSkill ABC + SkillContext + Artifact + SkillValidationError
+│   ├── brainstorm/                  # LangGraph brainstorm subgraph
+│   │   ├── state.py                 # BrainstormState TypedDict (13 fields)
+│   │   ├── nodes.py                 # Node factories (explore, question, coverage, approaches, design, synthesize)
+│   │   ├── prompts.py               # Prompt templates for brainstorm nodes
+│   │   └── graph.py                 # StateGraph assembly with interrupt/resume flow
 │   ├── personas/                    # SDLC persona facades
 │   │   ├── base.py                  # BasePersona ABC with telemetry, policy, transport
-│   │   ├── product_manager.py       # PM persona wrapping Manna Ray skills
-│   │   ├── architect.py             # Architect persona
-│   │   ├── developer.py             # Developer persona (Superpowers TDD)
-│   │   ├── qa.py                    # QA persona (layered testing)
-│   │   ├── scrum_master.py          # Scrum Master persona
-│   │   └── stakeholder_proxy.py     # Stakeholder simulator persona
-│   ├── skills/                      # Ported Manna Ray skills as Deep Agents Skills
-│   │   ├── pm/                      # Product management skills
-│   │   ├── engineering/             # Technical skills
-│   │   └── qa/                      # Quality assurance skills
+│   │   ├── product_manager.py       # PM persona (idea → PRD + stories + backlog)
+│   │   ├── architect.py             # Architect persona (PRD → spec + plan)
+│   │   ├── developer.py             # Developer persona (plan → code via TDD)
+│   │   └── qa.py                    # QA persona (compliance + validation + findings routing)
+│   ├── skills/                      # Skill implementations
+│   │   ├── base.py                  # BaseSkill ABC + SkillContext + Artifact
+│   │   ├── llm.py                   # LLMClient protocol + StubLLMClient + AnthropicLLMClient
+│   │   ├── pm/                      # PrdGenerator, PrioritizationEngine, UserStoryWriter
+│   │   ├── engineering/             # TechSpecWriter, ImplementationPlanner, CodePlanner, plan_parser
+│   │   └── qa/                      # SpecComplianceChecker, ValidationReportGenerator, FindingsRouter
 │   ├── policy/                      # Autonomy policy engine
 │   │   ├── config.py                # PolicyConfig Pydantic model + YAML/env loaders
 │   │   ├── gates.py                 # ApprovalGate protocol + Auto/Mock implementations
@@ -198,16 +202,20 @@ libs/sdlc/                           # SDLC integration package (depends on supe
 │   │   ├── contract.py              # PersonaHandoff + HandoffResult Pydantic models
 │   │   ├── transport.py             # Transport protocol + InProcessTransport
 │   │   └── registry.py              # PersonaRegistry (lookup by name)
-│   └── workflows/                   # SDLC workflow definitions
-│       ├── idea_to_sprint.py        # Full planning-to-code workflow
-│       ├── quick_spec.py            # Fast path for small changes
-│       └── feedback_loop.py         # Post-launch analysis workflow
+│   ├── workflows/                   # Pipeline orchestration
+│   │   ├── orchestrator.py          # PipelineOrchestrator (run_idea_to_code, run_spec_from_prd, etc.)
+│   │   ├── result.py                # PipelineResult dataclass with retry tracking
+│   │   └── narrative.py             # NarrativeWriter (session narration to markdown)
+│   └── cli.py                       # Standalone CLI (superagents-sdlc command)
 └── tests/
     ├── unit_tests/
     │   ├── test_skills/
     │   ├── test_personas/
     │   ├── test_policy/
-    │   └── test_handoffs/
+    │   ├── test_handoffs/
+    │   ├── test_workflows/
+    │   ├── test_brainstorm/
+    │   └── test_cli.py
     └── integration_tests/
 ```
 
@@ -218,11 +226,16 @@ libs/sdlc/                           # SDLC integration package (depends on supe
 name = "superagents-sdlc"
 dependencies = [
     "superagents",               # SDK with telemetry (editable install from ../superagents)
-    "deepagents>=0.1.0",
-    "a2a-sdk>=0.3.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    "langgraph>=1.1.2,<2.0.0",  # brainstorm subgraph
 ]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40.0", "python-dotenv>=1.0.0"]
+
+[project.scripts]
+superagents-sdlc = "superagents_sdlc.cli:main"
 ```
 
 Telemetry lives in the superagents SDK package (`superagents.telemetry`), not as a
@@ -232,7 +245,8 @@ separate package. `superagents_sdlc` imports from it:
 from superagents.telemetry import persona_span, skill_span, handoff_span, approval_gate_span
 ```
 
-The editable install (`uv add --editable ../superagents`) is set up during bootstrapping.
+The `anthropic` extra is optional — the CLI works with `--stub` without it. Install
+with `pip install superagents-sdlc[anthropic]` for real LLM calls.
 
 ## Code standards
 

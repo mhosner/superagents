@@ -89,9 +89,9 @@ Personas communicate via the [Agent2Agent Protocol](https://a2a-protocol.org/) �
 │       │              │              │               │       │
 │  ┌────▼─────┐  ┌────▼─────┐  ┌────▼─────┐  ┌─────▼─────┐  │
 │  │ PM Skills│  │  Arch    │  │Superpwr  │  │ Layered   │  │
-│  │(ported   │  │  Skills  │  │TDD Cycle │  │ Testing   │  │
-│  │ from     │  │          │  │          │  │           │  │
-│  │MannaRay) │  │          │  │          │  │           │  │
+│  │          │  │  Skills  │  │TDD Cycle │  │ Testing   │  │
+│  │       │  │          │  │          │  │           │  │
+│  │       │  │          │  │          │  │           │  │
 │  └──────────┘  └──────────┘  └──────────┘  └───────────┘  │
 │                                                             │
 ├─────────────────────────────────────────────────────────────┤
@@ -113,11 +113,12 @@ superagents/
 │   │       └── telemetry/    # OpenTelemetry instrumentation
 │   ├── sdlc/                 # SDLC integration package
 │   │   └── src/superagents_sdlc/
+│   │       ├── brainstorm/   # LangGraph brainstorm subgraph (HITL)
 │   │       ├── personas/     # PM, Architect, Developer, QA persona facades
 │   │       ├── skills/       # PM, engineering, QA skills + LLM abstraction
 │   │       ├── policy/       # Autonomy policy engine + approval gates
 │   │       ├── handoffs/     # A2A-shaped handoff transport + registry
-│   │       ├── workflows/    # Pipeline orchestrator + result types
+│   │       ├── workflows/    # Pipeline orchestrator + narrative writer
 │   │       └── cli.py        # Standalone CLI (superagents-sdlc command)
 │   ├── cli/                  # Terminal UI (Textual, Deep Agents)
 │   ├── harbor/               # Evaluation/benchmark framework
@@ -128,9 +129,9 @@ superagents/
 
 ## Status
 
-Active development. The SDLC integration package (`libs/sdlc`) implements all four core personas, eight skills, the autonomy policy engine, A2A-shaped handoff system, pipeline orchestrator, and a standalone CLI. 187 tests, all passing.
+Active development. The SDLC integration package (`libs/sdlc`) implements four core personas, ten skills, an autonomy policy engine, A2A-shaped handoff system, pipeline orchestrator with automated QA retry, interactive CLI with human-in-the-loop, and a LangGraph brainstorm subgraph. 248 tests, all passing.
 
-### What's built (Phases 1-8)
+### What's built
 
 | Phase | What | Tests |
 | ----- | ---- | ----- |
@@ -142,11 +143,15 @@ Active development. The SDLC integration package (`libs/sdlc`) implements all fo
 | 6 | Executable plan format (plan parser, structured QA input, Superpowers format) | 9 |
 | 7 | Pipeline orchestrator (PipelineOrchestrator with named workflow methods) | 17 |
 | 8 | Standalone CLI + AnthropicLLMClient (argparse wrapper, `--stub` mode, `--json` output) | 14 |
+| 9 | QA feedback loop (FindingsRouter, automated single-retry pass with cascade) | 22 |
+| 10 | Interactive CLI mode (human approval gates, free-text revision, NarrativeWriter) | 17 |
+| 11 | LangGraph brainstorm subgraph (HITL interrupt/resume, 6-section design brief) | 29 |
+| 12 | Brief-to-pipeline integration (`--brief`, `--codebase-context` flags) | 9 |
 
 ### What's next
 
-- **Phase 9**: Deep Agents TUI integration
-- **Phase 10**: Harbor evaluation framework integration
+- Harbor evaluation framework (automated artifact quality scoring)
+- Deep Agents TUI integration
 
 ## Getting started
 
@@ -171,26 +176,39 @@ uv sync --group test --extra anthropic
 ### Run the CLI
 
 ```bash
-# With stub responses (no API key needed)
-uv run superagents-sdlc idea-to-code "Add dark mode" --output-dir ./output --stub
-
-# With real Anthropic API
-export ANTHROPIC_API_KEY=sk-...
-uv run superagents-sdlc idea-to-code "Add dark mode" \
-  --context-dir ./my-project/context \
+# Brainstorm a feature interactively (builds a design brief)
+uv run superagents-sdlc brainstorm "Add recurring tasks" \
+  --codebase-context ./CLAUDE.md \
   --output-dir ./output
 
-# JSON output for scripting
-uv run superagents-sdlc idea-to-code "Add dark mode" --output-dir ./output --stub --json --quiet
+# Run the full pipeline with the brief
+uv run superagents-sdlc idea-to-code "Add recurring tasks" \
+  --brief ./output/design_brief.md \
+  --output-dir ./output/pipeline -i
+
+# Non-interactive pipeline (fire-and-forget)
+uv run superagents-sdlc idea-to-code "Add dark mode" --output-dir ./output
+
+# With stub responses (no API key needed, for testing)
+uv run superagents-sdlc idea-to-code "Add dark mode" --output-dir ./output --stub
 ```
 
-Three subcommands matching the three pipeline entry points:
+Four subcommands:
 
 ```bash
-superagents-sdlc idea-to-code <idea> --output-dir <dir>          # Full: PM -> Arch -> Dev -> QA
-superagents-sdlc spec-from-prd <prd> --user-stories <stories> --output-dir <dir>  # Skip PM
-superagents-sdlc plan-from-spec --plan <plan> --spec <spec> --output-dir <dir>    # Skip PM + Arch
+superagents-sdlc brainstorm <idea> --output-dir <dir>             # Interactive brainstorm → design brief
+superagents-sdlc idea-to-code <idea> --output-dir <dir>           # Full: PM → Arch → Dev → QA
+superagents-sdlc spec-from-prd <prd> --user-stories <s> --output-dir <dir>  # Skip PM
+superagents-sdlc plan-from-spec --plan <p> --spec <s> --output-dir <dir>    # Skip PM + Arch
 ```
+
+Key flags:
+
+- `-i` / `--interactive` — Human approval gate after QA (approve/revise/quit)
+- `--brief <path>` — Feed a design brief into the pipeline (from brainstorm)
+- `--codebase-context <path>` — Codebase description for better artifacts
+- `--stub` — Use canned responses instead of Anthropic API
+- `--json` — Dump PipelineResult as JSON to stdout
 
 ### Development
 
@@ -210,6 +228,7 @@ Superagents wouldn't exist without these projects:
 - **[Deep Agents](https://github.com/langchain-ai/deepagents)** — The SDK and agent harness this project is forked from.
 - **[Superpowers](https://github.com/obra/superpowers)** by Jesse Vincent — The TDD-first agentic development methodology that is the engineering backbone of this project.
 - **[BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD)** — The persona-driven agile AI framework that inspired the SDLC role mapping and adoption gradient.
+- **[MySecond.ai Skills](https://www.mysecond.ai/skills)** — The PM skill definitions ported into the persona layer.
 - **[A2A Protocol](https://github.com/a2aproject/A2A)** — The open standard for agent-to-agent communication.
 
 ## License
