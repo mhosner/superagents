@@ -285,6 +285,26 @@ def test_interactive_revise_then_approve(tmp_path):
     assert "Fix the caching layer" in narrative
 
 
+def test_brief_flag_parsed():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "idea-to-code", "Add dark mode",
+        "--output-dir", "/tmp/out",
+        "--brief", "/path/brief.md",
+    ])
+    assert args.brief == "/path/brief.md"
+
+
+def test_codebase_context_flag_on_idea_to_code():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "idea-to-code", "Add dark mode",
+        "--output-dir", "/tmp/out",
+        "--codebase-context", "/path/context.md",
+    ])
+    assert args.codebase_context == "/path/context.md"
+
+
 def test_interactive_quit(tmp_path):
     output_dir = tmp_path / "output"
     result = subprocess.run(

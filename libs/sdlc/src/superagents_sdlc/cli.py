@@ -119,6 +119,16 @@ def _build_parser() -> argparse.ArgumentParser:
     idea_parser.add_argument(
         "--output-dir", required=True, help="Root directory for artifact output."
     )
+    idea_parser.add_argument(
+        "--brief",
+        default=None,
+        help="Path to a design brief file (from brainstorm command).",
+    )
+    idea_parser.add_argument(
+        "--codebase-context",
+        default=None,
+        help="Path to a file with codebase context.",
+    )
 
     # spec-from-prd
     spec_parser = subparsers.add_parser(
@@ -594,6 +604,11 @@ async def _run(args: argparse.Namespace) -> int:
     context.setdefault("product_context", "")
     context.setdefault("goals_context", "")
     context.setdefault("personas_context", "")
+
+    if hasattr(args, "brief") and args.brief:
+        context["brief"] = Path(args.brief).read_text()
+    if hasattr(args, "codebase_context") and args.codebase_context:
+        context["codebase_context"] = Path(args.codebase_context).read_text()
 
     # Build LLM client
     if args.stub:
