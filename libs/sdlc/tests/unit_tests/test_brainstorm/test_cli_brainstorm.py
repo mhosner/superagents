@@ -1,0 +1,130 @@
+"""Tests for the brainstorm CLI subcommand."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+from superagents_sdlc.cli import _build_parser
+
+
+# Derive cwd from test file location (portable, not hardcoded)
+_SDLC_DIR = str(Path(__file__).resolve().parents[3])
+
+
+def test_parse_brainstorm_subcommand():
+    parser = _build_parser()
+    args = parser.parse_args(["brainstorm", "Add dark mode", "--stub"])
+
+    assert args.command == "brainstorm"
+    assert args.idea == "Add dark mode"
+    assert args.stub is True
+    assert args.codebase_context is None
+    assert args.output_dir is None
+
+
+def test_parse_brainstorm_with_codebase_context():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "brainstorm", "Add dark mode",
+        "--codebase-context", "/path/to/context.md",
+        "--output-dir", "/tmp/out",
+        "--stub",
+    ])
+
+    assert args.codebase_context == "/path/to/context.md"
+    assert args.output_dir == "/tmp/out"
+
+
+def test_brainstorm_stub_end_to_end(tmp_path):
+    """Full brainstorm with --stub: answer question, select approach, approve 6 sections, approve brief."""
+    output_dir = tmp_path / "output"
+
+    # stdin: answer question, select approach, approve 6 sections, approve brief
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "brainstorm", "Add dark mode",
+            "--output-dir", str(output_dir),
+            "--stub",
+        ],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=_SDLC_DIR,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert (output_dir / "design_brief.md").exists()
+    brief = (output_dir / "design_brief.md").read_text()
+    assert "Design Brief" in brief
+
+
+def test_brainstorm_stub_quit(tmp_path):
+    """User quits at first question."""
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "brainstorm", "Test",
+            "--stub",
+        ],
+        input="q\n",
+        capture_output=True,
+        text=True,
+        cwd=_SDLC_DIR,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "cancelled" in result.stdout.lower()
+
+
+def test_brainstorm_codebase_context_file(tmp_path):
+    """Codebase context file is read into state."""
+    ctx_file = tmp_path / "context.md"
+    ctx_file.write_text("# Codebase\nPython monorepo with REST API")
+    output_dir = tmp_path / "output"
+
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "brainstorm", "Test",
+            "--codebase-context", str(ctx_file),
+            "--output-dir", str(output_dir),
+            "--stub",
+        ],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=_SDLC_DIR,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}; stdout: {result.stdout}"
+
+
+def test_brainstorm_no_output_dir():
+    """Without --output-dir, brief prints to stdout but no file written."""
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "brainstorm", "Test",
+            "--stub",
+        ],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=_SDLC_DIR,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "Design Brief" in result.stdout

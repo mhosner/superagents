@@ -147,7 +147,206 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir", required=True, help="Root directory for artifact output."
     )
 
+    # brainstorm
+    brainstorm_parser = subparsers.add_parser(
+        "brainstorm",
+        help="Interactive brainstorming session to build a design brief.",
+        parents=[shared],
+    )
+    brainstorm_parser.add_argument("idea", help="Feature idea or description.")
+    brainstorm_parser.add_argument(
+        "--codebase-context",
+        default=None,
+        help="Path to a file with codebase context (e.g., CLAUDE.md).",
+    )
+    brainstorm_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory to write the design brief (optional).",
+    )
+
     return parser
+
+
+class _BrainstormQuit(Exception):
+    """Raised when user quits the brainstorm session."""
+
+
+def _brainstorm_stub_responses() -> dict[str, str]:
+    """Canned LLM responses for brainstorm ``--stub`` mode.
+
+    For development testing only — content is generic fixtures.
+
+    Returns:
+        Map of prompt substrings to stub responses.
+    """
+    return {
+        # WARNING: key ordering matters — StubLLMClient returns first match.
+        # Synthesize must come before section keys since section text appears
+        # in synthesize prompt.
+        "Synthesize all": "# Design Brief\nStub design brief for testing.",
+        "Generate ONE": (
+            '{"question": "Who are the target users?",'
+            ' "options": ["developers", "PMs", "both"]}'
+        ),
+        "Evaluate which": (
+            '{"covered": ["users", "problem", "scope", "constraints",'
+            ' "integrations", "success_metrics"], "missing": [], "sufficient": true}'
+        ),
+        "Propose 2-3": (
+            '[{"name": "Simple", "description": "Minimal viable approach",'
+            ' "tradeoffs": "Less flexible but ships faster"}]'
+        ),
+        "Problem Statement": "## Problem Statement & Goals\nStub problem statement.",
+        "Target Users": "## Target Users & Personas\nStub users section.",
+        "Requirements": "## Requirements & User Stories\nStub requirements.",
+        "Acceptance Criteria": "## Acceptance Criteria\nStub criteria.",
+        "Scope Boundaries": "## Scope Boundaries\nStub scope.",
+        "Technical Constraints": "## Technical Constraints\nStub constraints.",
+    }
+
+
+async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) -> str:
+    """Handle a brainstorm interrupt by prompting the user.
+
+    Args:
+        payload: Interrupt payload with type and data.
+        quiet: If True, suppress output and return defaults.
+
+    Returns:
+        User's response string.
+
+    Raises:
+        _BrainstormQuit: If user types 'q' or 'quit'.
+    """
+    interrupt_type = payload["type"]
+
+    if interrupt_type == "question":
+        if not quiet:
+            print(f"\n{payload['question']}")  # noqa: T201
+            if payload.get("options"):
+                for i, opt in enumerate(payload["options"], 1):
+                    print(f"  {i}. {opt}")  # noqa: T201
+            print("  (type 'q' to quit)")  # noqa: T201
+        response = await _async_input("> ")
+        if response.strip().lower() in ("q", "quit"):
+            raise _BrainstormQuit
+        return response
+
+    if interrupt_type == "approaches":
+        if not quiet:
+            print("\nProposed approaches:")  # noqa: T201
+            for approach in payload["approaches"]:
+                print(f"\n  {approach['name']}: {approach['description']}")  # noqa: T201
+                print(f"    Tradeoffs: {approach['tradeoffs']}")  # noqa: T201
+            print("\n  (type 'q' to quit)")  # noqa: T201
+        response = await _async_input("Select approach by name> ")
+        if response.strip().lower() in ("q", "quit"):
+            raise _BrainstormQuit
+        return response
+
+    if interrupt_type == "design_section":
+        if not quiet:
+            print(f"\n--- {payload['title']} ---")  # noqa: T201
+            print(payload["content"])  # noqa: T201
+            print("\n  approve (a) / edit (paste text) / quit (q)")  # noqa: T201
+        response = await _async_input("> ")
+        if response.strip().lower() in ("q", "quit"):
+            raise _BrainstormQuit
+        return "approve" if response.strip().lower() in ("a", "approve") else response
+
+    if interrupt_type == "brief":
+        if not quiet:
+            print("\n--- Design Brief ---")  # noqa: T201
+            print(payload["brief"])  # noqa: T201
+            print("\n  approve (a) / revise (type feedback) / quit (q)")  # noqa: T201
+        response = await _async_input("> ")
+        if response.strip().lower() in ("q", "quit"):
+            raise _BrainstormQuit
+        return "approve" if response.strip().lower() in ("a", "approve") else response
+
+    # Unknown interrupt type — generic prompt
+    response = await _async_input(f"\n[{interrupt_type}]> ")
+    if response.strip().lower() in ("q", "quit"):
+        raise _BrainstormQuit
+    return response
+
+
+async def _run_brainstorm(args: argparse.Namespace) -> int:
+    """Run the brainstorm subgraph interactively.
+
+    Args:
+        args: Parsed CLI arguments.
+
+    Returns:
+        Exit code (0 success, 1 error).
+    """
+    from langgraph.types import Command  # noqa: PLC0415
+
+    from superagents_sdlc.brainstorm.graph import build_brainstorm_graph  # noqa: PLC0415
+
+    # Build LLM client
+    if args.stub:
+        llm: LLMClient = StubLLMClient(responses=_brainstorm_stub_responses())
+    else:
+        from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
+
+        llm = AnthropicLLMClient(model=args.model)
+
+    # Load context
+    context = _load_context(args.context_dir)
+    codebase = ""
+    if args.codebase_context:
+        codebase = Path(args.codebase_context).read_text()
+
+    # Build and invoke graph
+    graph = build_brainstorm_graph(llm)
+    config = {"configurable": {"thread_id": "brainstorm-cli"}}
+
+    initial: dict[str, object] = {
+        "idea": args.idea,
+        "product_context": context.get("product_context", ""),
+        "codebase_context": codebase,
+        "transcript": [],
+        "coverage": {},
+        "approaches": [],
+        "selected_approach": "",
+        "design_sections": [],
+        "current_section_idx": 0,
+        "brief": "",
+        "status": "exploring",
+        "iteration": 0,
+        "brief_revision_count": 0,
+    }
+
+    result = await graph.ainvoke(initial, config)
+
+    # Interrupt loop
+    try:
+        while result.get("__interrupt__"):
+            payload = result["__interrupt__"][0].value
+            response = await _handle_brainstorm_interrupt(
+                payload, quiet=args.quiet
+            )
+            result = await graph.ainvoke(Command(resume=response), config)
+    except _BrainstormQuit:
+        if not args.quiet:
+            print("\nBrainstorm cancelled.")  # noqa: T201
+        return 0
+
+    # Output brief
+    brief = result.get("brief", "")
+    if not args.quiet:
+        print(f"\n{brief}")  # noqa: T201
+
+    if args.output_dir:
+        out = Path(args.output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "design_brief.md").write_text(brief)
+        if not args.quiet:
+            print(f"\nBrief written to {out / 'design_brief.md'}")  # noqa: T201
+
+    return 0
 
 
 def _stub_responses() -> dict[str, str]:
@@ -381,6 +580,9 @@ async def _run(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 success, 1 error).
     """
+    if args.command == "brainstorm":
+        return await _run_brainstorm(args)
+
     from superagents_sdlc.policy.config import PolicyConfig  # noqa: PLC0415
     from superagents_sdlc.policy.engine import PolicyEngine  # noqa: PLC0415
     from superagents_sdlc.policy.gates import AutoApprovalGate  # noqa: PLC0415
