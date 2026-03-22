@@ -723,7 +723,7 @@ def main() -> None:
 
     try:
         code = asyncio.run(_run(args))
-    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+    except (FileNotFoundError, ValueError, RuntimeError, TypeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
         sys.exit(1)
     except KeyboardInterrupt:

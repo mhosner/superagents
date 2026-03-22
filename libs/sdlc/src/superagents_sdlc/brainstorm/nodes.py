@@ -27,6 +27,45 @@ _COVERAGE_DIMENSIONS = [
     "users", "problem", "scope", "constraints", "integrations", "success_metrics",
 ]
 
+
+def _extract_json(raw: str) -> Any:
+    """Extract JSON from LLM response that may contain markdown fences or prose.
+
+    Args:
+        raw: Raw LLM response text.
+
+    Returns:
+        Parsed JSON object.
+
+    Raises:
+        ValueError: If no valid JSON found.
+    """
+    text = raw.strip()
+
+    # Strip markdown code fences
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[1:])
+        if text.endswith("```"):
+            text = text[:-3].strip()
+
+    # Try parsing as-is first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Find first { or [ and try parsing from there
+    for i, ch in enumerate(text):
+        if ch in ("{", "["):
+            try:
+                return json.loads(text[i:])
+            except json.JSONDecodeError:
+                continue
+
+    msg = f"No valid JSON found in LLM response: {raw[:200]}"
+    raise ValueError(msg)
+
 MAX_QUESTION_ROUNDS = 4
 MAX_BRIEF_REVISIONS = 2
 
@@ -70,7 +109,7 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
             coverage=json.dumps(state["coverage"]),
         )
         raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
-        parsed = json.loads(raw)
+        parsed = _extract_json(raw)
 
         answer = interrupt({
             "type": "question",
@@ -105,7 +144,7 @@ def make_evaluate_coverage_node(llm: LLMClient) -> Callable[..., Any]:
             transcript=json.dumps(state["transcript"]),
         )
         raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
-        parsed = json.loads(raw)
+        parsed = _extract_json(raw)
 
         covered = {
             dim: dim in parsed["covered"]
@@ -141,7 +180,7 @@ def make_propose_approaches_node(llm: LLMClient) -> Callable[..., Any]:
             codebase_context=state["codebase_context"],
         )
         raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
-        approaches = json.loads(raw)
+        approaches = _extract_json(raw)
 
         selected = interrupt({
             "type": "approaches",
