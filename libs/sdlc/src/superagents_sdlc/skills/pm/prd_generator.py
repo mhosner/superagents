@@ -98,6 +98,19 @@ class PrdGenerator(BaseSkill):
         if "priority_output" in params:
             prompt_parts.append(f"## Priority ranking\n{params['priority_output']}")
 
+        if "brief" in params:
+            prompt_parts.append(
+                "## Design Brief\n"
+                "A structured brainstorm produced this brief. Use it "
+                "as the primary source for requirements, scope, and "
+                "constraints. Formalize and structure it into a "
+                "complete PRD — do not contradict the brief's "
+                "decisions unless technically impossible.\n\n"
+                f"{params['brief']}"
+            )
+        if "codebase_context" in params:
+            prompt_parts.append(f"## Codebase Context\n{params['codebase_context']}")
+
         if "previous_prd" in params:
             prompt_parts.append(f"## Previous PRD\n{params['previous_prd']}")
         if "revision_findings" in params:

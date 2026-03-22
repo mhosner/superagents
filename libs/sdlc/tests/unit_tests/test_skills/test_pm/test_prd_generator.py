@@ -100,3 +100,27 @@ async def test_prd_includes_revision_findings_in_prompt(tmp_path):
     idea_idx = prompt.index("## Idea / feature to spec")
     assert idea_idx < prev_idx
     assert prev_idx < findings_idx
+
+
+async def test_prd_includes_brief_in_prompt(tmp_path):
+    stub = _make_stub()
+    skill = PrdGenerator(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["brief"] = "# Design Brief\nRecurring tasks with daily/weekly schedules"
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "## Design Brief" in prompt
+    assert "Recurring tasks" in prompt
+
+
+async def test_prd_without_brief_unchanged(tmp_path):
+    stub = _make_stub()
+    skill = PrdGenerator(llm=stub)
+    context = _make_context(tmp_path)
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "Design Brief" not in prompt
