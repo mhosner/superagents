@@ -90,6 +90,28 @@ class NarrativeWriter:
         with self._path.open("a") as f:
             f.write(f"\n### Routing\n{routing_summary}. Cascade: {cascade}\n")
 
+    def record_brainstorm_summary(
+        self,
+        question_count: int,
+        approach_selected: str,
+        section_count: int,
+        brief_path: str,
+    ) -> None:
+        """Record brainstorm completion summary.
+
+        Args:
+            question_count: Number of Q&A rounds completed.
+            approach_selected: Name of the selected approach.
+            section_count: Number of design sections approved.
+            brief_path: Path to the generated design brief file.
+        """
+        with self._path.open("a") as f:
+            f.write(f"\n## Brainstorm Summary\n")
+            f.write(f"- {question_count} questions answered\n")
+            f.write(f"- Approach selected: {approach_selected}\n")
+            f.write(f"- {section_count} design sections approved\n")
+            f.write(f"- Brief: `{brief_path}`\n")
+
     def record_final_result(self, certification: str, total_passes: int) -> None:
         """Write the final result summary.
 

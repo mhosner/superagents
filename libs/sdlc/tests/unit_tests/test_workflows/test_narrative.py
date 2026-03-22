@@ -108,6 +108,22 @@ def test_record_final_result(tmp_path: Path):
     assert "Total passes: 3" in content
 
 
+def test_narrative_record_brainstorm_summary(tmp_path: Path):
+    narrative = NarrativeWriter(output_dir=tmp_path, title='idea-to-code "Test"')
+    narrative.record_brainstorm_summary(
+        question_count=3,
+        approach_selected="Simple approach",
+        section_count=6,
+        brief_path="output/design_brief.md",
+    )
+
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "Brainstorm" in content
+    assert "3 questions" in content
+    assert "Simple approach" in content
+    assert "design_brief.md" in content
+
+
 def test_full_narrative_flow(tmp_path: Path):
     writer = NarrativeWriter(tmp_path, 'idea-to-code "Add dark mode"')
 
