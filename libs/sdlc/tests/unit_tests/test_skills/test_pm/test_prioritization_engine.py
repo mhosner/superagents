@@ -75,3 +75,16 @@ async def test_priority_execute_includes_context_in_prompt(tmp_path):
     assert "Feature B" in prompt
     assert "increase retention by 15%" in prompt
     assert "project management tools" in prompt
+
+
+async def test_prioritization_includes_brief_in_prompt(tmp_path):
+    stub = _make_stub()
+    skill = PrioritizationEngine(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["brief"] = "# Brief\nHigh-impact recurring task feature"
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "## Design Brief" in prompt
+    assert "High-impact" in prompt

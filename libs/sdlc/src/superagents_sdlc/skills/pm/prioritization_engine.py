@@ -97,6 +97,8 @@ class PrioritizationEngine(BaseSkill):
             prompt_parts.append(f"## Persona pain points\n{params['personas_context']}")
         if "competitors_context" in params:
             prompt_parts.append(f"## Competitive factors\n{params['competitors_context']}")
+        if "brief" in params:
+            prompt_parts.append(f"## Design Brief\n{params['brief']}")
 
         prompt = "\n\n".join(prompt_parts)
         response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
