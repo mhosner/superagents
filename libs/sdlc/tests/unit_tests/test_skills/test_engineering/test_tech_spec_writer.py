@@ -100,3 +100,16 @@ async def test_tech_spec_includes_revision_findings_in_prompt(tmp_path):
     prd_idx = prompt.index("## PRD")
     assert prd_idx < prev_idx
     assert prev_idx < findings_idx
+
+
+async def test_tech_spec_includes_codebase_context_in_prompt(tmp_path):
+    stub = _make_stub()
+    skill = TechSpecWriter(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["codebase_context"] = "# Codebase\nPython monorepo with REST API"
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "## Codebase Context" in prompt
+    assert "Python monorepo" in prompt

@@ -132,6 +132,8 @@ class CodePlanner(BaseSkill):
             prompt_parts.append(f"## User stories\n{params['user_stories']}")
         if "prd" in params:
             prompt_parts.append(f"## PRD\n{params['prd']}")
+        if "codebase_context" in params:
+            prompt_parts.append(f"## Codebase Context\n{params['codebase_context']}")
 
         if "previous_code" in params:
             prompt_parts.append(f"## Previous code plan\n{params['previous_code']}")

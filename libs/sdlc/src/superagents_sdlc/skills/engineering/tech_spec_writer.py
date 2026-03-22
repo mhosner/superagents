@@ -88,6 +88,8 @@ class TechSpecWriter(BaseSkill):
             prompt_parts.append(f"## Goals\n{params['goals_context']}")
         if "priority_output" in params:
             prompt_parts.append(f"## Priority ranking\n{params['priority_output']}")
+        if "codebase_context" in params:
+            prompt_parts.append(f"## Codebase Context\n{params['codebase_context']}")
 
         if "previous_tech_spec" in params:
             prompt_parts.append(f"## Previous tech_spec\n{params['previous_tech_spec']}")

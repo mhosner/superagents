@@ -130,3 +130,16 @@ async def test_code_planner_includes_revision_findings_in_prompt(tmp_path):
     plan_idx = prompt.index("## Implementation plan")
     assert plan_idx < prev_idx
     assert prev_idx < findings_idx
+
+
+async def test_code_planner_includes_codebase_context(tmp_path):
+    stub = _make_stub()
+    skill = CodePlanner(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["codebase_context"] = "# Codebase\nFastAPI with SQLAlchemy"
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "## Codebase Context" in prompt
+    assert "FastAPI" in prompt

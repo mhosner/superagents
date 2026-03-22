@@ -89,6 +89,8 @@ class ImplementationPlanner(BaseSkill):
             prompt_parts.append(f"## PRD\n{params['prd']}")
         if "product_context" in params:
             prompt_parts.append(f"## Product context\n{params['product_context']}")
+        if "codebase_context" in params:
+            prompt_parts.append(f"## Codebase Context\n{params['codebase_context']}")
 
         if "previous_implementation_plan" in params:
             prev = params["previous_implementation_plan"]

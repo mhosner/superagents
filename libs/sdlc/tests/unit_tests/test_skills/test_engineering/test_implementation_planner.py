@@ -66,3 +66,16 @@ async def test_planner_execute_includes_context_in_prompt(tmp_path):
     assert "REST API" in prompt
     assert "PostgreSQL" in prompt
     assert "dark mode" in prompt
+
+
+async def test_implementation_planner_includes_codebase_context(tmp_path):
+    stub = _make_stub()
+    skill = ImplementationPlanner(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["codebase_context"] = "# Codebase\nDjango app with PostgreSQL"
+
+    await skill.execute(context)
+
+    prompt = stub.calls[0][0]
+    assert "## Codebase Context" in prompt
+    assert "Django app" in prompt
