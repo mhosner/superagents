@@ -10,6 +10,7 @@ from superagents_sdlc.skills.base import SkillContext, SkillValidationError
 from superagents_sdlc.skills.llm import StubLLMClient
 from superagents_sdlc.skills.qa.validation_report_generator import (
     ValidationReportGenerator,
+    _extract_certification,
 )
 
 if TYPE_CHECKING:
@@ -85,3 +86,31 @@ async def test_validation_execute_includes_context_in_prompt(tmp_path):
     prompt = stub.calls[0][0]
     assert "Pass: 1" in prompt
     assert "DarkModeToggle" in prompt
+
+
+def test_extract_certification_infers_needs_work_when_missing_but_fixes_present():
+    """When certification section is absent but required fixes exist, infer NEEDS WORK."""
+    response = (
+        "# Validation Report\n"
+        "## Executive Summary\nPartial coverage.\n"
+        "## Required Fixes\n- Add persistence tests\n- Fix auth flow\n"
+        "## Recommended Improvements\n- Add logging\n"
+    )
+    assert _extract_certification(response) == "NEEDS WORK"
+
+
+def test_extract_certification_returns_unknown_when_no_section_no_fixes():
+    """When certification section is absent and no required fixes, return unknown."""
+    response = (
+        "# Validation Report\n"
+        "## Executive Summary\nAll good.\n"
+        "## Recommended Improvements\n- Add logging\n"
+    )
+    assert _extract_certification(response) == "unknown"
+
+
+def test_prompt_mandates_certification_as_final_line():
+    """System prompt must mandate certification rating as the very last line."""
+    from superagents_sdlc.skills.qa.validation_report_generator import _SYSTEM_PROMPT
+
+    assert "last line" in _SYSTEM_PROMPT.lower() or "final line" in _SYSTEM_PROMPT.lower()

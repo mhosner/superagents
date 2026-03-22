@@ -26,7 +26,8 @@ No A+ fantasies on first attempts.
 3. **Risk assessment** — What could go wrong if we proceed
 4. **Required fixes** — Must-fix items before proceeding (if any)
 5. **Recommended improvements** — Nice-to-have items
-6. **Certification** — One of exactly three ratings:
+6. **Certification** — The final line of your response MUST be exactly one of \
+these three ratings on its own line, with no text after it:
    - **FAILED**: Critical gaps, missing requirements, fundamental design issues
    - **NEEDS WORK**: Partial coverage, addressable issues, proceed with fixes
    - **READY**: All requirements covered, risks mitigated, clear to proceed
@@ -44,6 +45,10 @@ def _extract_certification(response: str) -> str:
     in the compliance results body. Checks READY, NEEDS WORK, FAILED in
     priority order — FAILED wins if multiple are present.
 
+    When no explicit certification is found but the response contains a
+    "Required Fixes" section with items, infers "NEEDS WORK" to unblock
+    the pipeline loop.
+
     Args:
         response: Raw LLM response text.
 
@@ -56,7 +61,33 @@ def _extract_certification(response: str) -> str:
     for cert in _CERTIFICATIONS:
         if cert in tail:
             found = cert
+    if found == "unknown" and _has_required_fixes(response):
+        return "NEEDS WORK"
     return found
+
+
+def _has_required_fixes(response: str) -> bool:
+    """Check whether the response contains a Required Fixes section with items.
+
+    Args:
+        response: Raw LLM response text.
+
+    Returns:
+        True if a Required Fixes heading is followed by list items.
+    """
+    lines = response.splitlines()
+    in_fixes = False
+    for line in lines:
+        stripped = line.strip()
+        if "required fixes" in stripped.lower():
+            in_fixes = True
+            continue
+        if in_fixes:
+            if stripped.startswith("- "):
+                return True
+            if stripped.startswith("#"):
+                in_fixes = False
+    return False
 
 
 class ValidationReportGenerator(BaseSkill):
