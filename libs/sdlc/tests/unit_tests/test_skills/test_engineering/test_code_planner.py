@@ -110,7 +110,36 @@ async def test_code_planner_output_parseable_as_plan(tmp_path):
     assert tasks[0].checkboxes == 4
 
 
-async def test_code_planner_includes_revision_findings_in_prompt(tmp_path):
+async def test_code_planner_uses_revision_prompt_when_findings_present(tmp_path):
+    """When revision_findings is present, the LLM gets the revision system prompt."""
+    stub = _make_stub()
+    skill = CodePlanner(llm=stub)
+    context = _make_context(tmp_path)
+    context.parameters["revision_findings"] = '[{"id":"RF-2","summary":"Missing error test"}]'
+    context.parameters["previous_code"] = "### Task 1: Old code plan"
+
+    await skill.execute(context)
+
+    system = stub.calls[0][1]
+    assert "EDITING an existing plan" in system
+    assert "producing an executable TDD" not in system
+
+
+async def test_code_planner_uses_normal_prompt_without_findings(tmp_path):
+    """Without revision_findings, the LLM gets the standard system prompt."""
+    stub = _make_stub()
+    skill = CodePlanner(llm=stub)
+    context = _make_context(tmp_path)
+
+    await skill.execute(context)
+
+    system = stub.calls[0][1]
+    assert "producing an executable TDD" in system
+    assert "EDITING an existing plan" not in system
+
+
+async def test_code_planner_revision_prompt_previous_plan_is_primary(tmp_path):
+    """In revision mode, previous plan appears before findings with preserve framing."""
     stub = _make_stub()
     skill = CodePlanner(llm=stub)
     context = _make_context(tmp_path)
@@ -120,16 +149,15 @@ async def test_code_planner_includes_revision_findings_in_prompt(tmp_path):
     await skill.execute(context)
 
     prompt = stub.calls[0][0]
-    assert "## Previous code plan" in prompt
     assert "Old code plan" in prompt
-    assert "## Revision findings" in prompt
     assert "Missing error test" in prompt
-    # Both come after the core context (implementation plan, tech spec)
-    prev_idx = prompt.index("## Previous code plan")
-    findings_idx = prompt.index("## Revision findings")
-    plan_idx = prompt.index("## Implementation plan")
-    assert plan_idx < prev_idx
+    # Previous plan comes before findings
+    prev_idx = prompt.index("Old code plan")
+    findings_idx = prompt.index("Missing error test")
     assert prev_idx < findings_idx
+    # Previous plan section header signals preservation
+    prev_header = prompt[:prev_idx]
+    assert "preserve" in prev_header.lower()
 
 
 async def test_code_planner_includes_codebase_context(tmp_path):

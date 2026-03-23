@@ -79,6 +79,49 @@ bundle multiple components into a single task
 """
 
 
+_REVISION_SYSTEM_PROMPT = """\
+You are a senior developer revising an existing TDD implementation plan \
+based on QA findings. You are EDITING an existing plan, NOT writing a new one.
+
+## CRITICAL INSTRUCTION
+
+Your input includes:
+1. The previous code plan (the base document)
+2. QA findings listing specific gaps
+
+Your output must:
+- PRESERVE every existing task from the previous plan that was NOT flagged \
+by QA. Copy them through unchanged — same task numbers, same content, same \
+verification steps.
+- ADD new tasks to address each QA finding. Insert them at the correct \
+position in the dependency order.
+- MODIFY existing tasks only if a finding specifically says the task is \
+incorrect or incomplete. In that case, keep the task number and update only \
+the flagged part.
+- MAINTAIN the same format: ### Task N: [Name], checkboxes, Run: commands, \
+TDD order.
+- NUMBER new tasks to continue from the last existing task number. If the \
+previous plan had Tasks 1-12, new tasks start at Task 13.
+
+## What NOT to do
+
+- Do NOT rewrite tasks that QA did not flag.
+- Do NOT renumber existing tasks.
+- Do NOT change file paths, function signatures, or test commands in \
+unflagged tasks.
+- Do NOT drop tasks from the previous plan. Every previous task must appear \
+in your output.
+- Do NOT produce a "summary of changes" — produce the complete revised plan.
+
+## Format
+
+Output the COMPLETE plan — all preserved tasks plus all new/modified \
+tasks — in the same Superpowers format as the original. The output must \
+be a single, self-contained plan document that an executing agent can \
+follow top to bottom.
+"""
+
+
 class CodePlanner(BaseSkill):
     """Generate detailed TDD code plans."""
 
@@ -124,6 +167,8 @@ class CodePlanner(BaseSkill):
         params = context.parameters
         plan = params["implementation_plan"]
         spec = params["tech_spec"]
+        is_revision = "revision_findings" in params
+        system = _REVISION_SYSTEM_PROMPT if is_revision else _SYSTEM_PROMPT
 
         prompt_parts = [
             f"## Implementation plan\n{plan}",
@@ -137,13 +182,22 @@ class CodePlanner(BaseSkill):
         if "codebase_context" in params:
             prompt_parts.append(f"## Codebase Context\n{params['codebase_context']}")
 
-        if "previous_code" in params:
-            prompt_parts.append(f"## Previous code plan\n{params['previous_code']}")
-        if "revision_findings" in params:
-            prompt_parts.append(f"## Revision findings\n{params['revision_findings']}")
+        if is_revision and "previous_code" in params:
+            prompt_parts.insert(
+                0,
+                f"## PREVIOUS PLAN (preserve all unflagged tasks)\n{params['previous_code']}",
+            )
+            prompt_parts.append(
+                f"## QA FINDINGS (add tasks to address each)\n{params['revision_findings']}",
+            )
+        else:
+            if "previous_code" in params:
+                prompt_parts.append(f"## Previous code plan\n{params['previous_code']}")
+            if "revision_findings" in params:
+                prompt_parts.append(f"## Revision findings\n{params['revision_findings']}")
 
         prompt = "\n\n".join(prompt_parts)
-        response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
+        response = await self._llm.generate(prompt, system=system)
 
         output_path = context.artifact_dir / "code_plan.md"
         output_path.write_text(response)

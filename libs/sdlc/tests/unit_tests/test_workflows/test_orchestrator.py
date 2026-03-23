@@ -15,6 +15,18 @@ from superagents_sdlc.skills.llm import StubLLMClient
 from superagents_sdlc.workflows.orchestrator import PipelineOrchestrator, _get_handoff
 
 
+def _is_code_plan_call(call: tuple[str, str]) -> bool:
+    """Check if a StubLLMClient call is a CodePlanner invocation.
+
+    Matches both initial generation (starts with "## Implementation plan")
+    and revision mode (starts with "## PREVIOUS PLAN").
+    """
+    return (
+        call[0].startswith("## Implementation plan\n")
+        or call[0].startswith("## PREVIOUS PLAN")
+    )
+
+
 def _make_pipeline_llm() -> StubLLMClient:
     """StubLLMClient with canned responses for all skills across all personas.
 
@@ -64,8 +76,14 @@ def _make_pipeline_llm() -> StubLLMClient:
             # Architect skills
             "## PRD\n": "# Tech Spec\n## Architecture\nMicroservices with REST API",
             "## Technical specification\n": ("## Tasks\n1. Create model\n2. Build API\n3. Add UI"),
-            # Developer skills
+            # Developer skills — initial generation and revision mode
             "## Implementation plan\n": (
+                "### Task 1: DarkModeToggle\n\n"
+                "- [ ] **Step 1: Write test**\n"
+                "Run: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
+            "## PREVIOUS PLAN": (
                 "### Task 1: DarkModeToggle\n\n"
                 "- [ ] **Step 1: Write test**\n"
                 "Run: `pytest -v`\n\n"
@@ -596,7 +614,14 @@ async def test_retry_cascade_developer_only(exporter, tmp_path):
             ),
             "## PRD\n": "# Tech Spec\n## Architecture\nSimple",
             "## Technical specification\n": "## Tasks\n1. Build it",
+            # Matches both initial ("## Implementation plan") and revision
+            # ("## PREVIOUS PLAN") prompts for CodePlanner
             "## Implementation plan\n": (
+                "### Task 1: Feature\n\n"
+                "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
+            "## PREVIOUS PLAN": (
                 "### Task 1: Feature\n\n"
                 "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
                 "- [ ] **Step 2: Implement**\n"
@@ -622,7 +647,7 @@ async def test_retry_cascade_developer_only(exporter, tmp_path):
     assert len(tech_spec_calls) == 1
 
     # Developer skill should be called at least twice (initial + retry)
-    code_plan_calls = [c for c in stub_llm.calls if c[0].startswith("## Implementation plan\n")]
+    code_plan_calls = [c for c in stub_llm.calls if _is_code_plan_call(c)]
     assert len(code_plan_calls) >= 2
 
 
@@ -668,6 +693,11 @@ async def test_retry_cascade_pm_triggers_all_downstream(exporter, tmp_path):
                 "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
                 "- [ ] **Step 2: Implement**\n"
             ),
+            "## PREVIOUS PLAN": (
+                "### Task 1: Feature\n\n"
+                "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
         }
     )
 
@@ -687,7 +717,7 @@ async def test_retry_cascade_pm_triggers_all_downstream(exporter, tmp_path):
     # All three content personas should be called at least twice
     prd_calls = [c for c in stub_llm.calls if c[0].startswith("## Idea / feature to spec\n")]
     tech_spec_calls = [c for c in stub_llm.calls if c[0].startswith("## PRD\n")]
-    code_plan_calls = [c for c in stub_llm.calls if c[0].startswith("## Implementation plan\n")]
+    code_plan_calls = [c for c in stub_llm.calls if _is_code_plan_call(c)]
     assert len(prd_calls) >= 2
     assert len(tech_spec_calls) >= 2
     assert len(code_plan_calls) >= 2
@@ -765,6 +795,11 @@ async def test_human_revision_developer_only(exporter, tmp_path):
                 "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
                 "- [ ] **Step 2: Implement**\n"
             ),
+            "## PREVIOUS PLAN": (
+                "### Task 1: Feature\n\n"
+                "- [ ] **Step 1: Write test**\nRun: `pytest -v`\n\n"
+                "- [ ] **Step 2: Implement**\n"
+            ),
         }
     )
 
@@ -787,7 +822,7 @@ async def test_human_revision_developer_only(exporter, tmp_path):
     )
     # Count developer calls after initial pipeline
     code_plan_calls_before = len(
-        [c for c in stub_llm.calls if c[0].startswith("## Implementation plan\n")]
+        [c for c in stub_llm.calls if _is_code_plan_call(c)]
     )
 
     result = await orchestrator.run_human_revision(
@@ -800,7 +835,7 @@ async def test_human_revision_developer_only(exporter, tmp_path):
         [c for c in stub_llm.calls if c[0].startswith("## PRD\n")]
     )
     code_plan_calls_after = len(
-        [c for c in stub_llm.calls if c[0].startswith("## Implementation plan\n")]
+        [c for c in stub_llm.calls if _is_code_plan_call(c)]
     )
 
     # Architect should NOT have been called again
