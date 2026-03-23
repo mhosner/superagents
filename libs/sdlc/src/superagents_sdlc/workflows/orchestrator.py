@@ -91,8 +91,8 @@ class PipelineOrchestrator:
 
         Args:
             llm: Strong LLM for PM and QA reasoning tasks.
-            fast_llm: Optional cheaper LLM for Architect, Developer, and
-                FindingsRouter. Falls back to llm when not provided.
+            fast_llm: Optional cheaper LLM for Architect and FindingsRouter.
+                Falls back to llm when not provided.
             policy_engine: Policy engine for handoff evaluation.
             context: Project-level context files (product_context, etc.).
         """
@@ -109,7 +109,7 @@ class PipelineOrchestrator:
             llm=effective_fast, policy_engine=policy_engine, transport=self._transport
         )
         self._developer = DeveloperPersona(
-            llm=effective_fast, policy_engine=policy_engine, transport=self._transport
+            llm=llm, policy_engine=policy_engine, transport=self._transport
         )
         self._qa = QAPersona(
             llm=llm, fast_llm=fast_llm, policy_engine=policy_engine,

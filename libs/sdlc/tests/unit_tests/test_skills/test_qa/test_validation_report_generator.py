@@ -114,3 +114,10 @@ def test_prompt_mandates_certification_as_final_line():
     from superagents_sdlc.skills.qa.validation_report_generator import _SYSTEM_PROMPT
 
     assert "last line" in _SYSTEM_PROMPT.lower() or "final line" in _SYSTEM_PROMPT.lower()
+
+
+def test_certification_prompt_contains_retry_guidance():
+    """System prompt must explain how certification drives the automated retry loop."""
+    from superagents_sdlc.skills.qa.validation_report_generator import _SYSTEM_PROMPT
+
+    assert "automated retry" in _SYSTEM_PROMPT.lower()

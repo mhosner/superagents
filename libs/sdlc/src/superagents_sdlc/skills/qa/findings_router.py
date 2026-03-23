@@ -81,7 +81,7 @@ def _validate_manifest(data: dict[str, Any]) -> None:
     Raises:
         ValueError: If required keys or fields are missing.
     """
-    for key in ("certification", "total_findings", "routing"):
+    for key in ("total_findings", "routing"):
         if key not in data:
             msg = f"Routing manifest missing required key: {key}"
             raise ValueError(msg)

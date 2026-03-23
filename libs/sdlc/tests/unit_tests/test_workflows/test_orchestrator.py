@@ -953,8 +953,8 @@ async def test_orchestrator_fast_llm_routes_correctly(exporter, tmp_path):
                   or c[0].startswith("## Technical specification\n")]
     assert len(arch_calls) >= 2
 
-    # Developer skills should hit fast
-    dev_calls = [c for c in fast.calls if c[0].startswith("## Implementation plan\n")]
+    # Developer skills should hit strong (code plans need structured format)
+    dev_calls = [c for c in strong.calls if c[0].startswith("## Implementation plan\n")]
     assert len(dev_calls) >= 1
 
     # QA compliance/validation should hit strong
@@ -962,6 +962,33 @@ async def test_orchestrator_fast_llm_routes_correctly(exporter, tmp_path):
                        if c[0].startswith("## Code plan\n")
                        or c[0].startswith("## Compliance report\n")]
     assert len(qa_strong_calls) >= 2
+
+
+async def test_orchestrator_uses_strong_llm_for_developer(exporter, tmp_path):
+    """Developer uses strong LLM because code plans need structured format compliance."""
+    strong = _make_pipeline_llm()
+    fast = _make_pipeline_llm()
+
+    config = PolicyConfig(autonomy_level=2)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+    orchestrator = PipelineOrchestrator(
+        llm=strong,
+        fast_llm=fast,
+        policy_engine=engine,
+        context={
+            "product_context": "B2B SaaS",
+            "goals_context": "Q1 goals",
+            "personas_context": "# PM\nManages projects",
+        },
+    )
+
+    await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # Developer skills should hit strong, not fast
+    dev_calls_strong = [c for c in strong.calls if c[0].startswith("## Implementation plan\n")]
+    dev_calls_fast = [c for c in fast.calls if c[0].startswith("## Implementation plan\n")]
+    assert len(dev_calls_strong) >= 1
+    assert len(dev_calls_fast) == 0
 
 
 async def test_orchestrator_no_fast_llm_uses_single(exporter, tmp_path):

@@ -584,10 +584,7 @@ def _make_skill_callback(
     Returns:
         Callback function for on_skill_complete.
     """
-    def on_skill(persona_name: str, skill_name: str, artifact: Artifact) -> None:
-        summary = artifact.metadata.get("summary", "")
-        if not summary:
-            summary = f"Produced {artifact.artifact_type} artifact."
+    def on_skill(persona_name: str, skill_name: str, summary: str) -> None:
         narrative.record_skill_execution(persona_name, skill_name, summary)
         if not quiet:
             if spinner is not None:

@@ -146,6 +146,32 @@ async def test_findings_router_strips_markdown_fences(tmp_path):
     assert written["total_findings"] == 2
 
 
+async def test_findings_router_accepts_manifest_without_certification(tmp_path):
+    """Certification is redundant with validation report metadata — not required."""
+    no_cert_manifest = json.dumps({
+        "total_findings": 1,
+        "routing": {
+            "product_manager": [],
+            "architect": [{
+                "id": "RF-1",
+                "summary": "Missing caching layer",
+                "detail": "Spec does not address caching.",
+                "affected_artifact": "tech_spec",
+                "related_requirements": [
+                    {"id": "S1-AC3", "text": "Response time under 200ms"},
+                ],
+            }],
+            "developer": [],
+        },
+    })
+    skill = FindingsRouter(llm=_make_stub(response=no_cert_manifest))
+    context = _make_context(tmp_path)
+    artifact = await skill.execute(context)
+
+    assert artifact.artifact_type == "routing_manifest"
+    assert artifact.metadata["total_findings"] == "1"
+
+
 async def test_findings_router_rejects_finding_missing_fields(tmp_path):
     bad_manifest = json.dumps({
         "certification": "NEEDS WORK",

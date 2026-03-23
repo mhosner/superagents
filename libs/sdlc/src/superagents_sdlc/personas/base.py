@@ -82,7 +82,11 @@ class BasePersona(ABC):
                 skill.validate(context)
                 artifact = await skill.execute(context)
                 if self.on_skill_complete is not None:
-                    self.on_skill_complete(self.name, skill_name, artifact)
+                    summary = artifact.metadata.get(
+                        "summary",
+                        f"Produced {artifact.artifact_type} artifact.",
+                    )
+                    self.on_skill_complete(self.name, skill_name, summary)
                 return artifact
             except Exception:
                 span.set_status(trace.StatusCode.ERROR)

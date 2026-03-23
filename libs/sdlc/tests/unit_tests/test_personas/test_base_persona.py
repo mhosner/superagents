@@ -216,6 +216,48 @@ async def test_request_handoff_passes_through_policy(exporter, tmp_path):
     assert len(gate_spans) == 1
 
 
+async def test_skill_callback_receives_rich_summary(exporter, tmp_path):
+    """on_skill_complete receives the summary string from artifact metadata."""
+
+    class SummarySkill(BaseSkill):
+        def __init__(self) -> None:
+            super().__init__(name="summary_skill", description="Has summary", required_context=[])
+
+        async def execute(self, context: SkillContext) -> Artifact:
+            return Artifact(
+                path="/out.txt",
+                artifact_type="prd",
+                metadata={"summary": "Generated PRD for dark mode"},
+            )
+
+    calls: list[tuple[str, str, str]] = []
+
+    def callback(persona_name: str, skill_name: str, summary: str) -> None:
+        calls.append((persona_name, skill_name, summary))
+
+    persona = _make_persona(skills={"summary_skill": SummarySkill()})
+    persona.on_skill_complete = callback
+    await persona.execute_skill("summary_skill", _make_context(tmp_path))
+
+    assert len(calls) == 1
+    assert calls[0] == ("test_persona", "summary_skill", "Generated PRD for dark mode")
+
+
+async def test_skill_callback_fallback_when_no_summary(exporter, tmp_path):
+    """on_skill_complete receives fallback string when no summary in metadata."""
+    calls: list[tuple[str, str, str]] = []
+
+    def callback(persona_name: str, skill_name: str, summary: str) -> None:
+        calls.append((persona_name, skill_name, summary))
+
+    persona = _make_persona()
+    persona.on_skill_complete = callback
+    await persona.execute_skill("stub_skill", _make_context(tmp_path))
+
+    assert len(calls) == 1
+    assert calls[0] == ("test_persona", "stub_skill", "Produced test artifact.")
+
+
 async def test_request_handoff_rejected_does_not_send(exporter, tmp_path):
     registry = PersonaRegistry()
     persona = _make_persona(

@@ -27,10 +27,24 @@ No A+ fantasies on first attempts.
 4. **Required fixes** — Must-fix items before proceeding (if any)
 5. **Recommended improvements** — Nice-to-have items
 6. **Certification** — The final line of your response MUST be exactly one of \
-these three ratings on its own line, with no text after it:
-   - **FAILED**: Critical gaps, missing requirements, fundamental design issues
-   - **NEEDS WORK**: Partial coverage, addressable issues, proceed with fixes
-   - **READY**: All requirements covered, risks mitigated, clear to proceed
+these three ratings on its own line, with no text after it. Choose carefully — \
+this determines whether the automated retry loop fires:
+   - **READY**: All requirements have corresponding implementation tasks with \
+verification steps. Risks are identified and mitigated. Clear to hand to an \
+executing agent.
+   - **NEEDS WORK**: The plan has gaps that can be fixed by adding, modifying, \
+or expanding tasks. Examples: missing implementation tasks for specified \
+components, missing test cases for acceptance criteria, incomplete verification \
+steps, integration points described but not tasked. These are completeness gaps, \
+not design failures. The automated retry will attempt to fix them.
+   - **FAILED**: The plan has fundamental problems that cannot be fixed by adding \
+tasks. Examples: the architecture contradicts the requirements, the tech spec is \
+internally inconsistent, acceptance criteria are mutually exclusive, the chosen \
+approach cannot satisfy a hard constraint. Use FAILED only when the plan needs \
+to be redesigned, not just completed.
+
+When in doubt between NEEDS WORK and FAILED, choose NEEDS WORK. Most plans with \
+missing tasks are incomplete, not wrong. FAILED should be rare.
 """
 
 # Ordered by ascending severity; last match wins in _extract_certification.
