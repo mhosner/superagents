@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 5
+_BASE_DELAY = 2.0
 
 
 @runtime_checkable
@@ -108,9 +115,13 @@ class AnthropicLLMClient:
         self.model = model
         self._max_tokens = max_tokens
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        self._rate_limit_error = anthropic.RateLimitError
 
     async def generate(self, prompt: str, *, system: str = "") -> str:
         """Generate a response via the Anthropic API.
+
+        Retries up to ``_MAX_RETRIES`` times on rate-limit errors with
+        exponential backoff.
 
         Args:
             prompt: User prompt.
@@ -118,6 +129,9 @@ class AnthropicLLMClient:
 
         Returns:
             Raw response text.
+
+        Raises:
+            anthropic.RateLimitError: If retries are exhausted.
         """
         kwargs: dict[str, object] = {
             "model": self.model,
@@ -126,5 +140,23 @@ class AnthropicLLMClient:
         }
         if system:
             kwargs["system"] = system
-        response = await self._client.messages.create(**kwargs)
-        return response.content[0].text
+
+        for attempt in range(_MAX_RETRIES):
+            try:
+                if self._max_tokens > 16384:  # noqa: PLR2004
+                    async with self._client.messages.stream(**kwargs) as stream:
+                        response = await stream.get_final_message()
+                else:
+                    response = await self._client.messages.create(**kwargs)
+                return response.content[0].text
+            except self._rate_limit_error:
+                if attempt == _MAX_RETRIES - 1:
+                    raise
+                delay = _BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "Rate limited (attempt %d/%d), retrying in %.1fs",
+                    attempt + 1, _MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+        msg = "unreachable"
+        raise RuntimeError(msg)
