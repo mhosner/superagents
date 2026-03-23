@@ -917,3 +917,58 @@ async def test_on_retry_start_called_at_retry(exporter, tmp_path):
     pre_cert, routing = retry_calls[0]
     assert pre_cert == "NEEDS WORK"
     assert isinstance(routing, dict)
+
+
+# -- fast_llm model routing tests --
+
+
+async def test_orchestrator_fast_llm_routes_correctly(exporter, tmp_path):
+    """Architect and Developer use fast_llm; PM and QA compliance/validation use strong."""
+    strong = _make_pipeline_llm()
+    fast = _make_pipeline_llm()
+
+    config = PolicyConfig(autonomy_level=2)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+    orchestrator = PipelineOrchestrator(
+        llm=strong,
+        fast_llm=fast,
+        policy_engine=engine,
+        context={
+            "product_context": "B2B SaaS",
+            "goals_context": "Q1 goals",
+            "personas_context": "# PM\nManages projects",
+        },
+    )
+
+    await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # PM skills should hit strong (3 calls: prioritization, prd, user_story)
+    pm_calls = [c for c in strong.calls if c[0].startswith("## Items to prioritize")
+                or c[0].startswith("## Idea / feature to spec")
+                or c[0].startswith("## Feature description")]
+    assert len(pm_calls) >= 3
+
+    # Architect skills should hit fast
+    arch_calls = [c for c in fast.calls if c[0].startswith("## PRD\n")
+                  or c[0].startswith("## Technical specification\n")]
+    assert len(arch_calls) >= 2
+
+    # Developer skills should hit fast
+    dev_calls = [c for c in fast.calls if c[0].startswith("## Implementation plan\n")]
+    assert len(dev_calls) >= 1
+
+    # QA compliance/validation should hit strong
+    qa_strong_calls = [c for c in strong.calls
+                       if c[0].startswith("## Code plan\n")
+                       or c[0].startswith("## Compliance report\n")]
+    assert len(qa_strong_calls) >= 2
+
+
+async def test_orchestrator_no_fast_llm_uses_single(exporter, tmp_path):
+    """Without fast_llm, all personas use the same llm."""
+    orchestrator, single_llm = _make_orchestrator()
+
+    await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    # All calls should be on the single llm
+    assert len(single_llm.calls) >= 9

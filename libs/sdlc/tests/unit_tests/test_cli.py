@@ -324,6 +324,183 @@ def test_parse_max_tokens_default():
     assert args.max_tokens == 16384
 
 
+def test_streaming_shows_skill_entries(tmp_path):
+    """Non-quiet run streams skill-level entries to stdout."""
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    # Should contain skill-level streaming entries
+    assert "prd_generator" in result.stdout
+    assert "product_manager" in result.stdout or "→" in result.stdout
+
+
+def test_streaming_shows_certification(tmp_path):
+    """Non-quiet run streams certification to stdout."""
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    # Should see certification from QA callback streaming (indented)
+    assert "Certification: NEEDS WORK" in result.stdout
+
+
+def test_quiet_suppresses_streaming(tmp_path):
+    """--quiet suppresses all narrative streaming to stdout."""
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+            "--quiet",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    # Quiet mode: no skill entries, no phase lines
+    assert "prd_generator" not in result.stdout
+    assert "phase" not in result.stdout.lower()
+
+
+def test_no_phase_level_progress_lines(tmp_path):
+    """Old 'PM phase... done' lines are replaced by skill-level detail."""
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "phase... done" not in result.stdout
+
+
+def test_fast_model_flag_parsed():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "idea-to-code", "Add dark mode",
+        "--output-dir", "/tmp/out",
+        "--fast-model", "claude-haiku-4-5",
+    ])
+    assert args.fast_model == "claude-haiku-4-5"
+
+
+def test_fast_model_default_none():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "idea-to-code", "Add dark mode",
+        "--output-dir", "/tmp/out",
+    ])
+    assert args.fast_model is None
+
+
+def test_banner_shows_on_non_quiet_run(tmp_path):
+    """Non-quiet run shows the ASCII banner with version."""
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "Not all coding heroes wear capes" in result.stdout
+    assert "____" in result.stdout  # part of ASCII art
+
+
+def test_banner_suppressed_when_quiet(tmp_path):
+    """--quiet suppresses the banner."""
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+            "--quiet",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "Not all coding heroes wear capes" not in result.stdout
+
+
 def test_narrative_includes_skill_entries(tmp_path):
     """Stub pipeline narrative includes skill-level entries from on_skill_complete."""
     output_dir = tmp_path / "output"

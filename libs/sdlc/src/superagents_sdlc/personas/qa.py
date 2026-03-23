@@ -35,20 +35,23 @@ class QAPersona(BasePersona):
         self,
         *,
         llm: LLMClient,
+        fast_llm: LLMClient | None = None,
         policy_engine: PolicyEngine,
         transport: Transport,
     ) -> None:
         """Initialize with LLM client and infrastructure.
 
         Args:
-            llm: LLM client for skill execution.
+            llm: LLM client for compliance and validation (strong reasoning).
+            fast_llm: Optional cheaper LLM for FindingsRouter. Falls back to llm.
             policy_engine: Policy engine for handoff evaluation.
             transport: Transport for delivering handoffs.
         """
+        router_llm = fast_llm or llm
         skills = {
             "spec_compliance_checker": SpecComplianceChecker(llm=llm),
             "validation_report_generator": ValidationReportGenerator(llm=llm),
-            "findings_router": FindingsRouter(llm=llm),
+            "findings_router": FindingsRouter(llm=router_llm),
         }
         super().__init__(
             name="qa",

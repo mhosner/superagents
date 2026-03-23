@@ -101,6 +101,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Max tokens for LLM responses (default: 16384).",
     )
     shared.add_argument(
+        "--fast-model",
+        default=None,
+        help=(
+            "Cheaper model for Architect/Developer/FindingsRouter "
+            "(default: uses --model for all)."
+        ),
+    )
+    shared.add_argument(
         "--stub",
         action="store_true",
         help="Use StubLLMClient instead of Anthropic (development testing only).",
@@ -470,11 +478,6 @@ def _make_phase_callback(
             narrative.start_pass(2, "Automated Retry")
         seen_phases.append(name)
 
-        if not quiet:
-            count = len(artifacts)
-            label = "artifact" if count == 1 else "artifacts"
-            print(f"{name.upper()} phase... done ({count} {label})")  # noqa: T201
-
         # Extract certification and findings for QA phases
         certification = ""
         findings: list[str] | None = None
@@ -495,11 +498,15 @@ def _make_phase_callback(
 def _make_skill_callback(
     *,
     narrative: NarrativeWriter,
+    quiet: bool,
+    spinner: object | None = None,
 ) -> callable:
-    """Build the on_skill_complete callback for narrative recording.
+    """Build the on_skill_complete callback for narrative recording and streaming.
 
     Args:
         narrative: NarrativeWriter instance.
+        quiet: Whether to suppress stdout output.
+        spinner: Optional Spinner instance for loading animation.
 
     Returns:
         Callback function for on_skill_complete.
@@ -509,6 +516,18 @@ def _make_skill_callback(
         if not summary:
             summary = f"Produced {artifact.artifact_type} artifact."
         narrative.record_skill_execution(persona_name, skill_name, summary)
+        if not quiet:
+            if spinner is not None:
+                spinner.stop()
+            from superagents_sdlc.cli_format import print_skill  # noqa: PLC0415
+
+            print_skill(persona_name, skill_name, summary)
+            if spinner is not None:
+                import random  # noqa: PLC0415
+
+                from superagents_sdlc.cli_spinner import PHRASES  # noqa: PLC0415
+
+                spinner.start(random.choice(PHRASES))  # noqa: S311
 
     return on_skill
 
@@ -516,11 +535,15 @@ def _make_skill_callback(
 def _make_qa_callback(
     *,
     narrative: NarrativeWriter,
+    quiet: bool,
+    spinner: object | None = None,
 ) -> callable:
-    """Build the on_qa_complete callback for narrative recording.
+    """Build the on_qa_complete callback for narrative recording and streaming.
 
     Args:
         narrative: NarrativeWriter instance.
+        quiet: Whether to suppress stdout output.
+        spinner: Optional Spinner instance for loading animation.
 
     Returns:
         Callback function for on_qa_complete.
@@ -549,6 +572,18 @@ def _make_qa_callback(
             key_findings=findings,
             certification=certification,
         )
+        if not quiet:
+            if spinner is not None:
+                spinner.stop()
+            from superagents_sdlc.cli_format import print_qa_findings  # noqa: PLC0415
+
+            print_qa_findings(certification=certification, key_findings=findings)
+            if spinner is not None:
+                import random  # noqa: PLC0415
+
+                from superagents_sdlc.cli_spinner import PHRASES  # noqa: PLC0415
+
+                spinner.start(random.choice(PHRASES))  # noqa: S311
 
     return on_qa
 
@@ -556,17 +591,33 @@ def _make_qa_callback(
 def _make_routing_callback(
     *,
     narrative: NarrativeWriter,
+    quiet: bool,
+    spinner: object | None = None,
 ) -> callable:
-    """Build the on_findings_routed callback for narrative recording.
+    """Build the on_findings_routed callback for narrative recording and streaming.
 
     Args:
         narrative: NarrativeWriter instance.
+        quiet: Whether to suppress stdout output.
+        spinner: Optional Spinner instance for loading animation.
 
     Returns:
         Callback function for on_findings_routed.
     """
     def on_routed(routing: dict, cascade: list[str]) -> None:
         narrative.record_findings_routing(routing, cascade)
+        if not quiet:
+            if spinner is not None:
+                spinner.stop()
+            from superagents_sdlc.cli_format import print_routing  # noqa: PLC0415
+
+            print_routing(routing, cascade)
+            if spinner is not None:
+                import random  # noqa: PLC0415
+
+                from superagents_sdlc.cli_spinner import PHRASES  # noqa: PLC0415
+
+                spinner.start(random.choice(PHRASES))  # noqa: S311
 
     return on_routed
 
@@ -574,11 +625,15 @@ def _make_routing_callback(
 def _make_retry_callback(
     *,
     narrative: NarrativeWriter,
+    quiet: bool,
+    spinner: object | None = None,
 ) -> callable:
-    """Build the on_retry_start callback for narrative recording.
+    """Build the on_retry_start callback for narrative recording and streaming.
 
     Args:
         narrative: NarrativeWriter instance.
+        quiet: Whether to suppress stdout output.
+        spinner: Optional Spinner instance for loading animation.
 
     Returns:
         Callback function for on_retry_start.
@@ -593,6 +648,18 @@ def _make_retry_callback(
             finding_count=total,
             persona_breakdown=breakdown,
         )
+        if not quiet:
+            if spinner is not None:
+                spinner.stop()
+            from superagents_sdlc.cli_format import print_retry_start  # noqa: PLC0415
+
+            print_retry_start(pre_certification, total)
+            if spinner is not None:
+                import random  # noqa: PLC0415
+
+                from superagents_sdlc.cli_spinner import PHRASES  # noqa: PLC0415
+
+                spinner.start(random.choice(PHRASES))  # noqa: S311
 
     return on_retry
 
@@ -721,13 +788,18 @@ async def _run(args: argparse.Namespace) -> int:
     if hasattr(args, "codebase_context") and args.codebase_context:
         context["codebase_context"] = Path(args.codebase_context).read_text()
 
-    # Build LLM client
+    # Build LLM clients
+    fast_llm: LLMClient | None = None
     if args.stub:
         llm: LLMClient = StubLLMClient(responses=_stub_responses())
     else:
         from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
 
         llm = AnthropicLLMClient(model=args.model, max_tokens=args.max_tokens)
+        if args.fast_model:
+            fast_llm = AnthropicLLMClient(
+                model=args.fast_model, max_tokens=args.max_tokens,
+            )
 
     # Build policy engine
     config = PolicyConfig(autonomy_level=args.autonomy_level)
@@ -737,7 +809,24 @@ async def _run(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    orchestrator = PipelineOrchestrator(llm=llm, policy_engine=engine, context=context)
+    orchestrator = PipelineOrchestrator(
+        llm=llm, fast_llm=fast_llm, policy_engine=engine, context=context,
+    )
+
+    # Banner and spinner
+    if not args.quiet:
+        from superagents_sdlc.cli_spinner import Spinner, print_banner  # noqa: PLC0415
+
+        try:
+            import importlib.metadata as _meta  # noqa: PLC0415
+
+            version = _meta.version("superagents-sdlc")
+        except _meta.PackageNotFoundError:
+            version = "dev"
+        print_banner(version)
+        spinner: Spinner | None = Spinner()
+    else:
+        spinner = None
 
     # Set up narrative writer
     narrative = NarrativeWriter(
@@ -752,10 +841,18 @@ async def _run(args: argparse.Namespace) -> int:
         quiet=args.quiet, narrative=narrative,
         seen_phases=seen_phases, retry_state=retry_state,
     )
-    on_skill = _make_skill_callback(narrative=narrative)
-    on_qa = _make_qa_callback(narrative=narrative)
-    on_routed = _make_routing_callback(narrative=narrative)
-    on_retry = _make_retry_callback(narrative=narrative)
+    on_skill = _make_skill_callback(narrative=narrative, quiet=args.quiet, spinner=spinner)
+    on_qa = _make_qa_callback(narrative=narrative, quiet=args.quiet, spinner=spinner)
+    on_routed = _make_routing_callback(narrative=narrative, quiet=args.quiet, spinner=spinner)
+    on_retry = _make_retry_callback(narrative=narrative, quiet=args.quiet, spinner=spinner)
+
+    # Start spinner for the first skill
+    if spinner is not None:
+        import random  # noqa: PLC0415
+
+        from superagents_sdlc.cli_spinner import PHRASES  # noqa: PLC0415
+
+        spinner.start(random.choice(PHRASES))  # noqa: S311
 
     # Run the appropriate pipeline
     result = await _run_pipeline(
@@ -763,6 +860,10 @@ async def _run(args: argparse.Namespace) -> int:
         on_skill=on_skill, on_qa=on_qa,
         on_routed=on_routed, on_retry=on_retry,
     )
+
+    # Stop spinner
+    if spinner is not None:
+        spinner.stop()
 
     # Interactive review loop or finalize
     if args.interactive:

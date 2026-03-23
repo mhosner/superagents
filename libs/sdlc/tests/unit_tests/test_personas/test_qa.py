@@ -202,3 +202,38 @@ async def test_qa_handle_handoff_without_user_stories_path(exporter, tmp_path):
 
     artifacts = await qa.handle_handoff(handoff, context)
     assert len(artifacts) == 3
+
+
+async def test_qa_uses_fast_llm_for_findings_router(exporter, tmp_path):
+    """FindingsRouter uses fast_llm; compliance and validation use strong llm."""
+    strong = _make_stub_llm()
+    fast = _make_stub_llm()
+
+    config = PolicyConfig(autonomy_level=2)
+    engine = PolicyEngine(config=config, gate=AutoApprovalGate())
+    registry = PersonaRegistry()
+    transport = InProcessTransport(registry=registry)
+
+    qa = QAPersona(llm=strong, fast_llm=fast, policy_engine=engine, transport=transport)
+    registry.register(qa)
+    context = _make_context(tmp_path)
+
+    await qa.run_validation(context)
+
+    # strong should have compliance + validation calls (2)
+    assert len(strong.calls) == 2
+    # fast should have the findings_router call (1)
+    assert len(fast.calls) == 1
+    assert "## Validation report\n" in fast.calls[0][0]
+
+
+async def test_qa_no_fast_llm_uses_single_llm(exporter, tmp_path):
+    """When fast_llm is not provided, all skills use the same llm."""
+    llm = _make_stub_llm()
+    qa, _ = _make_qa(tmp_path, stub_llm=llm)
+    context = _make_context(tmp_path)
+
+    await qa.run_validation(context)
+
+    # All 3 calls on the single llm
+    assert len(llm.calls) == 3
