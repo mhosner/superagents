@@ -204,8 +204,8 @@ async def test_qa_handle_handoff_without_user_stories_path(exporter, tmp_path):
     assert len(artifacts) == 3
 
 
-async def test_qa_uses_fast_llm_for_findings_router(exporter, tmp_path):
-    """FindingsRouter uses fast_llm; compliance and validation use strong llm."""
+async def test_qa_uses_strong_llm_for_findings_router(exporter, tmp_path):
+    """All QA skills including FindingsRouter use the strong llm."""
     strong = _make_stub_llm()
     fast = _make_stub_llm()
 
@@ -220,11 +220,10 @@ async def test_qa_uses_fast_llm_for_findings_router(exporter, tmp_path):
 
     await qa.run_validation(context)
 
-    # strong should have compliance + validation calls (2)
-    assert len(strong.calls) == 2
-    # fast should have the findings_router call (1)
-    assert len(fast.calls) == 1
-    assert "## Validation report\n" in fast.calls[0][0]
+    # All 3 calls (compliance + validation + findings_router) should hit strong
+    assert len(strong.calls) == 3
+    # fast should have no calls
+    assert len(fast.calls) == 0
 
 
 async def test_qa_no_fast_llm_uses_single_llm(exporter, tmp_path):

@@ -91,7 +91,7 @@ class PipelineOrchestrator:
 
         Args:
             llm: Strong LLM for PM and QA reasoning tasks.
-            fast_llm: Optional cheaper LLM for Architect and FindingsRouter.
+            fast_llm: Optional cheaper LLM for Architect.
                 Falls back to llm when not provided.
             policy_engine: Policy engine for handoff evaluation.
             context: Project-level context files (product_context, etc.).
