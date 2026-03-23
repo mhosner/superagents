@@ -7,6 +7,7 @@ import json
 import pytest
 from langgraph.types import Command
 
+from superagents_sdlc.brainstorm.confidence import SECTIONS
 from superagents_sdlc.brainstorm.graph import build_brainstorm_graph
 from superagents_sdlc.skills.llm import StubLLMClient
 
@@ -18,16 +19,45 @@ def _initial_state() -> dict:
         "product_context": "Web app",
         "codebase_context": "",
         "transcript": [],
-        "coverage": {},
+        "section_readiness": {},
+        "confidence_score": 0,
+        "gaps": [],
+        "deferred_sections": [],
+        "round_number": 0,
         "approaches": [],
         "selected_approach": "",
         "design_sections": [],
         "current_section_idx": 0,
         "brief": "",
         "status": "exploring",
-        "iteration": 0,
         "brief_revision_count": 0,
     }
+
+
+def _all_high_assessment():
+    return json.dumps({
+        "sections": {s: {"readiness": "high", "evidence": "clear"} for s in SECTIONS},
+        "gaps": [],
+        "recommendation": "ready",
+    })
+
+
+def _low_assessment():
+    return json.dumps({
+        "sections": {
+            "problem_statement": {"readiness": "high", "evidence": "clear"},
+            "users_and_personas": {"readiness": "high", "evidence": "clear"},
+            "requirements": {"readiness": "medium", "evidence": "partial"},
+            "acceptance_criteria": {"readiness": "low", "evidence": "missing"},
+            "scope_boundaries": {"readiness": "medium", "evidence": "vague"},
+            "technical_constraints": {"readiness": "low", "evidence": "none"},
+        },
+        "gaps": [
+            {"section": "acceptance_criteria", "description": "No error paths"},
+            {"section": "technical_constraints", "description": "No storage discussion"},
+        ],
+        "recommendation": "continue",
+    })
 
 
 def _make_full_stub() -> StubLLMClient:
@@ -36,14 +66,13 @@ def _make_full_stub() -> StubLLMClient:
     Key ordering matters -- StubLLMClient returns first match.
     """
     return StubLLMClient(responses={
-        "Generate ONE": '{"question": "Who are the users?", "options": null}',
-        "Evaluate which": json.dumps({
-            "covered": [
-                "users", "problem", "scope",
-                "constraints", "integrations", "success_metrics",
+        # Confidence assessment — must come before question prompts
+        "rate the readiness": _all_high_assessment(),
+        # Questions (gap-targeting)
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Who are the users?", "options": None, "targets_section": "users_and_personas"},
             ],
-            "missing": [],
-            "sufficient": True,
         }),
         "Propose 2-3": json.dumps([
             {"name": "Simple", "description": "Minimal", "tradeoffs": "Less flexible"},
@@ -69,122 +98,113 @@ async def test_graph_compiles():
     assert graph is not None
 
 
-async def test_first_interrupt_is_question():
-    """First invocation interrupts with a question."""
+async def test_confidence_above_threshold_proceeds_to_approaches():
+    """All-high confidence auto-proceeds to approaches interrupt."""
     graph = build_brainstorm_graph(_make_full_stub())
-    result = await graph.ainvoke(_initial_state(), _config("t-question"))
+    result = await graph.ainvoke(_initial_state(), _config("t-high-conf"))
 
-    interrupts = result.get("__interrupt__", ())
-    assert len(interrupts) > 0
-    assert interrupts[0].value["type"] == "question"
-    assert "Who are the users?" in interrupts[0].value["question"]
-
-
-async def test_question_to_approaches():
-    """After answering with sufficient coverage, approaches interrupt fires."""
-    graph = build_brainstorm_graph(_make_full_stub())
-    cfg = _config("t-approaches")
-
-    await graph.ainvoke(_initial_state(), cfg)
-    result = await graph.ainvoke(Command(resume="Developers"), cfg)
-
+    # Should skip questions and go straight to approaches
     interrupts = result.get("__interrupt__", ())
     assert len(interrupts) > 0
     assert interrupts[0].value["type"] == "approaches"
 
 
-async def test_approach_to_design_section():
-    """After selecting an approach, design section interrupt fires."""
-    graph = build_brainstorm_graph(_make_full_stub())
-    cfg = _config("t-design")
-
-    await graph.ainvoke(_initial_state(), cfg)
-    await graph.ainvoke(Command(resume="Developers"), cfg)
-    result = await graph.ainvoke(Command(resume="Simple"), cfg)
+async def test_confidence_below_threshold_shows_assessment():
+    """Low confidence interrupts with confidence_assessment."""
+    stub = StubLLMClient(responses={
+        "rate the readiness": _low_assessment(),
+        "## Gaps to address": json.dumps({
+            "questions": [{"question": "Q?", "options": None, "targets_section": "requirements"}],
+        }),
+    })
+    graph = build_brainstorm_graph(stub)
+    result = await graph.ainvoke(_initial_state(), _config("t-low-conf"))
 
     interrupts = result.get("__interrupt__", ())
     assert len(interrupts) > 0
-    assert interrupts[0].value["type"] == "design_section"
+    assert interrupts[0].value["type"] == "confidence_assessment"
+
+
+async def test_continue_loops_to_questions():
+    """'continue' response loops to question generation."""
+    stub = StubLLMClient(responses={
+        "rate the readiness": _low_assessment(),
+        "## Gaps to address": json.dumps({
+            "questions": [{"question": "Storage?", "options": ["JSON", "SQLite"], "targets_section": "technical_constraints"}],
+        }),
+    })
+    graph = build_brainstorm_graph(stub)
+    cfg = _config("t-continue")
+
+    # First: confidence assessment interrupt
+    await graph.ainvoke(_initial_state(), cfg)
+    # Continue → questions interrupt
+    result = await graph.ainvoke(Command(resume="continue"), cfg)
+
+    interrupts = result.get("__interrupt__", ())
+    assert len(interrupts) > 0
+    assert interrupts[0].value["type"] == "questions"
 
 
 async def test_full_flow_to_completion():
-    """Full brainstorm flow runs to completion with all approvals."""
+    """Full brainstorm flow with high confidence runs to completion."""
     graph = build_brainstorm_graph(_make_full_stub())
     cfg = _config("t-full")
 
-    # Question
-    await graph.ainvoke(_initial_state(), cfg)
-    # Answer
-    await graph.ainvoke(Command(resume="Developers"), cfg)
+    # High confidence → approaches interrupt
+    result = await graph.ainvoke(_initial_state(), cfg)
     # Select approach
-    await graph.ainvoke(Command(resume="Simple"), cfg)
+    result = await graph.ainvoke(Command(resume="Simple"), cfg)
     # Approve 6 design sections
     for _ in range(6):
-        await graph.ainvoke(Command(resume="approve"), cfg)
+        result = await graph.ainvoke(Command(resume="approve"), cfg)
     # Approve brief
     result = await graph.ainvoke(Command(resume="approve"), cfg)
 
-    # No more interrupts -- graph complete
     interrupts = result.get("__interrupt__", ())
     assert len(interrupts) == 0
     assert result["status"] == "complete"
     assert "Design Brief" in result["brief"]
 
 
-async def test_question_loop_max_iterations():
-    """After 4 question rounds, evaluation forces transition to approaches."""
-    llm = StubLLMClient(responses={
-        "Generate ONE": '{"question": "Another question?", "options": null}',
-        "Evaluate which": json.dumps({
-            "covered": ["users"],
-            "missing": ["problem", "scope"],
-            "sufficient": False,
-        }),
+async def test_override_forces_proceed():
+    """'override' response bypasses threshold and proceeds to approaches."""
+    stub = StubLLMClient(responses={
+        "rate the readiness": _low_assessment(),
         "Propose 2-3": json.dumps([
             {"name": "A", "description": "d", "tradeoffs": "t"},
         ]),
     })
-    graph = build_brainstorm_graph(llm)
-    cfg = _config("t-maxloop")
-
-    # First question
-    await graph.ainvoke(_initial_state(), cfg)
-    # Answer 4 questions (max iterations)
-    for i in range(4):
-        await graph.ainvoke(Command(resume=f"Answer {i}"), cfg)
-
-    # After 4 iterations, should be past questioning
-    snapshot = await graph.aget_state(cfg)
-    assert snapshot.values.get("iteration", 0) >= 4
-
-
-async def test_design_sections_to_synthesize():
-    """After approving all 6 sections, next interrupt is brief review."""
-    graph = build_brainstorm_graph(_make_full_stub())
-    cfg = _config("t-sections")
+    graph = build_brainstorm_graph(stub)
+    cfg = _config("t-override")
 
     await graph.ainvoke(_initial_state(), cfg)
-    await graph.ainvoke(Command(resume="Developers"), cfg)
-    await graph.ainvoke(Command(resume="Simple"), cfg)
-
-    # Approve 5 sections, check 6th triggers synthesize
-    for _ in range(5):
-        await graph.ainvoke(Command(resume="approve"), cfg)
-    result = await graph.ainvoke(Command(resume="approve"), cfg)
+    result = await graph.ainvoke(Command(resume="override"), cfg)
 
     interrupts = result.get("__interrupt__", ())
     assert len(interrupts) > 0
-    assert interrupts[0].value["type"] == "brief"
+    assert interrupts[0].value["type"] == "approaches"
 
 
 async def test_state_snapshot_has_transcript():
-    """State snapshot contains transcript after answering a question."""
-    graph = build_brainstorm_graph(_make_full_stub())
+    """State snapshot contains transcript after answering questions."""
+    stub = StubLLMClient(responses={
+        "rate the readiness": _low_assessment(),
+        "## Gaps to address": json.dumps({
+            "questions": [{"question": "Q?", "options": None, "targets_section": "requirements"}],
+        }),
+    })
+    graph = build_brainstorm_graph(stub)
     cfg = _config("t-snapshot")
 
+    # Confidence assessment
     await graph.ainvoke(_initial_state(), cfg)
-    await graph.ainvoke(Command(resume="PMs"), cfg)
+    # Continue
+    await graph.ainvoke(Command(resume="continue"), cfg)
+    # Answer question
+    await graph.ainvoke(Command(resume=["My answer"]), cfg)
 
     snapshot = await graph.aget_state(cfg)
     assert len(snapshot.values["transcript"]) == 1
-    assert snapshot.values["transcript"][0]["answer"] == "PMs"
+    assert snapshot.values["transcript"][0]["answer"] == "My answer"
+    assert snapshot.values["round_number"] >= 1

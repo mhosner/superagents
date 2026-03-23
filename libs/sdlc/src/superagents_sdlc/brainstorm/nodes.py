@@ -12,7 +12,6 @@ from superagents_sdlc.skills.json_utils import extract_json
 from superagents_sdlc.brainstorm.prompts import (
     APPROACHES_PROMPT,
     BRAINSTORM_SYSTEM,
-    COVERAGE_PROMPT,
     DESIGN_SECTION_PROMPT,
     DESIGN_SECTIONS,
     QUESTION_PROMPT,
@@ -25,14 +24,31 @@ if TYPE_CHECKING:
     from superagents_sdlc.brainstorm.state import BrainstormState
     from superagents_sdlc.skills.llm import LLMClient
 
-_COVERAGE_DIMENSIONS = [
-    "users", "problem", "scope", "constraints", "integrations", "success_metrics",
-]
-
 # Re-export for backward compatibility; new code should import from json_utils.
 _extract_json = extract_json
 
-MAX_QUESTION_ROUNDS = 4
+MAX_BRIEF_REVISIONS = 2
+
+_SECTION_TITLES = {
+    "problem_statement": "Problem Statement & Goals",
+    "users_and_personas": "Target Users & Personas",
+    "requirements": "Requirements & User Stories",
+    "acceptance_criteria": "Acceptance Criteria",
+    "scope_boundaries": "Scope Boundaries & Out of Scope",
+    "technical_constraints": "Technical Constraints & Dependencies",
+}
+
+
+def _deferred_title(section: str) -> str:
+    """Get display title for a deferred section.
+
+    Args:
+        section: Section key name.
+
+    Returns:
+        Human-readable title.
+    """
+    return _SECTION_TITLES.get(section, section.replace("_", " ").title())
 MAX_BRIEF_REVISIONS = 2
 
 
@@ -44,11 +60,14 @@ def make_explore_context_node() -> Callable[..., Any]:
     """
 
     async def explore_context(state: BrainstormState) -> dict[str, Any]:  # noqa: ARG001
-        """Initialize coverage dict and set status to questioning."""
+        """Initialize state and set status to questioning."""
         return {
             "status": "questioning",
-            "coverage": dict.fromkeys(_COVERAGE_DIMENSIONS, False),
-            "iteration": 0,
+            "section_readiness": {},
+            "confidence_score": 0,
+            "gaps": [],
+            "deferred_sections": [],
+            "round_number": 0,
         }
 
     return explore_context
@@ -65,65 +84,53 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
     """
 
     async def generate_question(state: BrainstormState) -> dict[str, Any]:
-        """Generate a clarifying question and interrupt for human answer."""
+        """Generate gap-targeting questions and interrupt for human answers."""
         # NOTE: On resume, this LLM call re-executes. Acceptable cost for simplicity.
+        readiness = state.get("section_readiness", {})
+        gaps = state.get("gaps", [])
+
         prompt = QUESTION_PROMPT.format(
             idea=state["idea"],
             product_context=state["product_context"],
             codebase_context=state["codebase_context"],
             transcript=json.dumps(state["transcript"]),
-            coverage=json.dumps(state["coverage"]),
+            section_readiness=json.dumps(readiness),
+            gaps=json.dumps(gaps),
         )
         raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
         parsed = _extract_json(raw)
 
-        answer = interrupt({
-            "type": "question",
-            "question": parsed["question"],
-            "options": parsed.get("options"),
+        questions = parsed.get("questions", [])
+        if not questions:
+            # Fallback for old-format single question
+            questions = [{"question": parsed.get("question", "?"), "options": parsed.get("options")}]
+
+        answers = interrupt({
+            "type": "questions",
+            "questions": questions,
+            "round": state.get("round_number", 0) + 1,
+            "confidence": state.get("confidence_score", 0),
+            "gaps_remaining": len(gaps),
         })
 
+        # answers is a list of answer strings (one per question)
+        if isinstance(answers, str):
+            answers = [answers]
+
         updated = list(state["transcript"])
-        updated.append({"question": parsed["question"], "answer": answer})
+        for question, answer in zip(questions, answers, strict=False):
+            updated.append({
+                "question": question.get("question", "?"),
+                "answer": answer,
+                "targets_section": question.get("targets_section", ""),
+            })
         return {
             "transcript": updated,
-            "iteration": state["iteration"] + 1,
+            "round_number": state.get("round_number", 0) + 1,
         }
 
     return generate_question
 
-
-def make_evaluate_coverage_node(llm: LLMClient) -> Callable[..., Any]:
-    """Create the evaluate_coverage node.
-
-    Args:
-        llm: LLM client for evaluating coverage.
-
-    Returns:
-        Async node function that evaluates dimension coverage.
-    """
-
-    async def evaluate_coverage(state: BrainstormState) -> dict[str, Any]:
-        """Evaluate which brainstorming dimensions are covered."""
-        prompt = COVERAGE_PROMPT.format(
-            idea=state["idea"],
-            transcript=json.dumps(state["transcript"]),
-        )
-        raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
-        parsed = _extract_json(raw)
-
-        covered = {
-            dim: dim in parsed["covered"]
-            for dim in state["coverage"]
-        }
-        sufficient = parsed["sufficient"] or state["iteration"] >= MAX_QUESTION_ROUNDS
-
-        return {
-            "coverage": covered,
-            "status": "proposing" if sufficient else "questioning",
-        }
-
-    return evaluate_coverage
 
 
 def make_propose_approaches_node(llm: LLMClient) -> Callable[..., Any]:
@@ -235,10 +242,21 @@ def make_synthesize_brief_node(llm: LLMClient) -> Callable[..., Any]:
     async def synthesize_brief(state: BrainstormState) -> dict[str, Any]:
         """Synthesize design sections into a brief and interrupt for approval."""
         # NOTE: On resume, this LLM call re-executes. Acceptable cost for simplicity.
+        deferred = state.get("deferred_sections", [])
         sections_text = "\n\n".join(
             f"### {s['title']}\n{s['content']}"
             for s in state["design_sections"]
         )
+        if deferred:
+            annotations = "\n\n".join(
+                f"### {_deferred_title(section)}\n"
+                f"> This section was not addressed during brainstorming "
+                f"and is marked for downstream resolution.\n\n"
+                f"[Section intentionally left minimal — to be completed "
+                f"by the Architect based on implementation context.]"
+                for section in deferred
+            )
+            sections_text = f"{sections_text}\n\n{annotations}"
 
         prompt = SYNTHESIZE_PROMPT.format(
             idea=state["idea"],

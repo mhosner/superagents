@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 
+from superagents_sdlc.brainstorm.confidence import make_estimate_confidence_node
 from superagents_sdlc.brainstorm.nodes import (
-    make_evaluate_coverage_node,
     make_explore_context_node,
     make_generate_design_section_node,
     make_generate_question_node,
@@ -26,12 +26,16 @@ def build_brainstorm_graph(
     llm: LLMClient,
     *,
     checkpointer: object | None = None,
+    confidence_threshold: int = 80,
+    max_rounds: int = 10,
 ) -> CompiledStateGraph:
     """Build and compile the brainstorm subgraph.
 
     Args:
         llm: LLM client for node generation.
         checkpointer: LangGraph checkpointer. Defaults to InMemorySaver.
+        confidence_threshold: Confidence score to auto-proceed.
+        max_rounds: Hard cap on question rounds.
 
     Returns:
         Compiled StateGraph ready for invocation.
@@ -43,28 +47,34 @@ def build_brainstorm_graph(
 
     # Add nodes
     builder.add_node("explore_context", make_explore_context_node())
+    builder.add_node("estimate_confidence", make_estimate_confidence_node(
+        llm, threshold=confidence_threshold, max_rounds=max_rounds,
+    ))
     builder.add_node("generate_question", make_generate_question_node(llm))
-    builder.add_node("evaluate_coverage", make_evaluate_coverage_node(llm))
     builder.add_node("propose_approaches", make_propose_approaches_node(llm))
     builder.add_node("generate_design_section", make_generate_design_section_node(llm))
     builder.add_node("synthesize_brief", make_synthesize_brief_node(llm))
 
-    # Linear edges
+    # Entry: explore → estimate_confidence
     builder.set_entry_point("explore_context")
-    builder.add_edge("explore_context", "generate_question")
-    builder.add_edge("generate_question", "evaluate_coverage")
+    builder.add_edge("explore_context", "estimate_confidence")
+
+    # After questions → estimate confidence again
+    builder.add_edge("generate_question", "estimate_confidence")
+
+    # After approach selection → design sections
     builder.add_edge("propose_approaches", "generate_design_section")
 
-    # Conditional: after coverage evaluation
-    def route_after_coverage(state: BrainstormState) -> str:
-        """Route back to questions or forward to approaches."""
+    # Conditional: after confidence estimation
+    def route_after_confidence(state: BrainstormState) -> str:
+        """Route to questions or forward to approaches."""
         if state["status"] == "questioning":
             return "generate_question"
         return "propose_approaches"
 
     builder.add_conditional_edges(
-        "evaluate_coverage",
-        route_after_coverage,
+        "estimate_confidence",
+        route_after_confidence,
         ["generate_question", "propose_approaches"],
     )
 

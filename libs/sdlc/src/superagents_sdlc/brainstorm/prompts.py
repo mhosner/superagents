@@ -21,24 +21,19 @@ QUESTION_PROMPT = """\
 ## Previous Q&A
 {transcript}
 
-## Coverage gaps
-{coverage}
+## Current section readiness
+{section_readiness}
 
-Generate ONE clarifying question to better understand this idea. \
-Prefer multiple-choice options when the question has a bounded answer space. \
-Return as JSON: {{"question": "...", "options": ["a", "b", ...] | null}}
-"""
+## Gaps to address
+{gaps}
 
-COVERAGE_PROMPT = """\
-## Idea
-{idea}
-
-## Q&A transcript
-{transcript}
-
-Evaluate which of these dimensions are now adequately covered: \
-users, problem, scope, constraints, integrations, success_metrics.
-Return as JSON: {{"covered": ["dim1", ...], "missing": ["dim2", ...], "sufficient": true|false}}
+Generate clarifying questions ONLY about sections rated "low" or "medium". \
+Never ask about "high" or "deferred" sections. \
+Generate 1 question per gap, up to 4 questions max. \
+Each question should be specific enough that the answer directly moves a section toward "high". \
+Prefer multiple-choice when the answer space is bounded. \
+Return as JSON: {{"questions": [{{"question": "...", "options": ["a", "b"] | null, \
+"targets_section": "section_name"}}]}}
 """
 
 APPROACHES_PROMPT = """\

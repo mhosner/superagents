@@ -10,7 +10,6 @@ import pytest
 from langgraph.errors import GraphInterrupt
 
 from superagents_sdlc.brainstorm.nodes import (
-    make_evaluate_coverage_node,
     make_explore_context_node,
     make_generate_design_section_node,
     make_generate_question_node,
@@ -24,11 +23,6 @@ if TYPE_CHECKING:
 
 _INTERRUPT_PATH = "superagents_sdlc.brainstorm.nodes.interrupt"
 
-_ALL_DIMS = [
-    "users", "problem", "scope",
-    "constraints", "integrations", "success_metrics",
-]
-
 
 def _make_state(**overrides: object) -> dict:
     """Create a default BrainstormState dict with optional overrides."""
@@ -37,17 +31,17 @@ def _make_state(**overrides: object) -> dict:
         "product_context": "Web app",
         "codebase_context": "",
         "transcript": [],
-        "coverage": {
-            "users": False, "problem": False, "scope": False,
-            "constraints": False, "integrations": False, "success_metrics": False,
-        },
+        "section_readiness": {},
+        "confidence_score": 0,
+        "gaps": [],
+        "deferred_sections": [],
+        "round_number": 0,
         "approaches": [],
         "selected_approach": "",
         "design_sections": [],
         "current_section_idx": 0,
         "brief": "",
         "status": "exploring",
-        "iteration": 0,
         "brief_revision_count": 0,
     }
     base.update(overrides)
@@ -61,7 +55,7 @@ def _raise_interrupt(value):
 def test_brainstorm_state_is_typeddict():
     state: BrainstormState = _make_state()  # type: ignore[assignment]
     assert state["status"] == "exploring"
-    assert len(state) == 13
+    assert len(state) == 16
 
 
 async def test_explore_context_initializes_state():
@@ -69,14 +63,20 @@ async def test_explore_context_initializes_state():
     result = await node(_make_state())
 
     assert result["status"] == "questioning"
-    assert all(v is False for v in result["coverage"].values())
-    assert len(result["coverage"]) == 6
-    assert result["iteration"] == 0
+    assert result["section_readiness"] == {}
+    assert result["confidence_score"] == 0
+    assert result["gaps"] == []
+    assert result["deferred_sections"] == []
+    assert result["round_number"] == 0
 
 
 async def test_generate_question_calls_llm_and_interrupts():
     llm = StubLLMClient(responses={
-        "Generate ONE": '{"question": "Who are the users?", "options": ["devs", "PMs"]}',
+        "## Gaps to address": (
+            '{"questions": [{"question": "Who are the users?",'
+            ' "options": ["devs", "PMs"],'
+            ' "targets_section": "users_and_personas"}]}'
+        ),
     })
     node = make_generate_question_node(llm)
 
@@ -89,61 +89,69 @@ async def test_generate_question_calls_llm_and_interrupts():
     assert len(llm.calls) == 1
 
 
-async def test_generate_question_returns_answer_on_resume():
+async def test_generate_question_returns_answers_on_resume():
     llm = StubLLMClient(responses={
-        "Generate ONE": '{"question": "Who are the users?", "options": null}',
+        "## Gaps to address": (
+            '{"questions": [{"question": "Who are the users?",'
+            ' "options": null, "targets_section": "users_and_personas"}]}'
+        ),
     })
     node = make_generate_question_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value="Developers"):
+    with patch(_INTERRUPT_PATH, return_value=["Developers"]):
         result = await node(_make_state())
 
-    assert result["transcript"] == [{"question": "Who are the users?", "answer": "Developers"}]
-    assert result["iteration"] == 1
+    assert len(result["transcript"]) == 1
+    assert result["transcript"][0]["answer"] == "Developers"
+    assert result["round_number"] == 1
 
 
-async def test_evaluate_coverage_sufficient():
-    all_covered = _ALL_DIMS
+async def test_generate_question_batch_multiple():
     llm = StubLLMClient(responses={
-        "Evaluate which": json.dumps({
-            "covered": all_covered,
-            "missing": [],
-            "sufficient": True,
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Storage?", "options": ["JSON", "SQLite"], "targets_section": "technical_constraints"},
+                {"question": "Error handling?", "options": None, "targets_section": "acceptance_criteria"},
+            ],
         }),
     })
-    node = make_evaluate_coverage_node(llm)
-    result = await node(_make_state(iteration=2))
+    node = make_generate_question_node(llm)
 
-    assert result["status"] == "proposing"
-    assert all(result["coverage"].values())
+    with patch(_INTERRUPT_PATH, return_value=["JSON", "Log and continue"]):
+        result = await node(_make_state())
+
+    assert len(result["transcript"]) == 2
+    assert result["transcript"][0]["answer"] == "JSON"
+    assert result["transcript"][1]["answer"] == "Log and continue"
+    assert result["round_number"] == 1
 
 
-async def test_evaluate_coverage_needs_more():
+async def test_generate_question_interrupt_payload_structure():
     llm = StubLLMClient(responses={
-        "Evaluate which": json.dumps({
-            "covered": ["users"],
-            "missing": ["problem", "scope"],
-            "sufficient": False,
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Q1?", "options": None, "targets_section": "requirements"},
+            ],
         }),
     })
-    node = make_evaluate_coverage_node(llm)
-    result = await node(_make_state(iteration=1))
+    node = make_generate_question_node(llm)
 
-    assert result["status"] == "questioning"
+    captured = {}
 
+    def capture_interrupt(value):
+        captured.update(value)
+        raise GraphInterrupt(value)
 
-async def test_evaluate_coverage_forced_at_max_iterations():
-    llm = StubLLMClient(responses={
-        "Evaluate which": json.dumps({
-            "covered": ["users"],
-            "missing": ["problem"],
-            "sufficient": False,
-        }),
-    })
-    node = make_evaluate_coverage_node(llm)
-    result = await node(_make_state(iteration=4))
+    with (
+        patch(_INTERRUPT_PATH, side_effect=capture_interrupt),
+        pytest.raises(GraphInterrupt),
+    ):
+        await node(_make_state(round_number=2, confidence_score=45))
 
-    assert result["status"] == "proposing"
+    assert captured["type"] == "questions"
+    assert len(captured["questions"]) == 1
+    assert captured["round"] == 3
+    assert captured["confidence"] == 45
 
 
 async def test_propose_approaches_interrupts():
@@ -284,3 +292,26 @@ async def test_synthesize_brief_max_revisions():
         ))
 
     assert result["status"] == "complete"
+
+
+async def test_synthesize_brief_annotates_deferred_sections():
+    llm = StubLLMClient(responses={
+        "Synthesize all": "# Design Brief\nContent",
+    })
+    node = make_synthesize_brief_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="approve"):
+        result = await node(_make_state(
+            status="synthesizing",
+            design_sections=[{"title": "T", "content": "C", "approved": True}],
+            selected_approach="Simple",
+            deferred_sections=["technical_constraints"],
+        ))
+
+    assert result["status"] == "complete"
+    # The brief is from LLM, but the prompt included deferred annotations
+    # Verify the LLM was called (annotation is in the prompt, not the output)
+    assert len(llm.calls) == 1
+    prompt = llm.calls[0][0]
+    assert "downstream resolution" in prompt
+    assert "Technical Constraints" in prompt

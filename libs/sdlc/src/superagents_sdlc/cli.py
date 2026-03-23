@@ -209,13 +209,23 @@ def _brainstorm_stub_responses() -> dict[str, str]:
         # Synthesize must come before section keys since section text appears
         # in synthesize prompt.
         "Synthesize all": "# Design Brief\nStub design brief for testing.",
-        "Generate ONE": (
-            '{"question": "Who are the target users?",'
-            ' "options": ["developers", "PMs", "both"]}'
-        ),
-        "Evaluate which": (
-            '{"covered": ["users", "problem", "scope", "constraints",'
-            ' "integrations", "success_metrics"], "missing": [], "sufficient": true}'
+        # Confidence assessment — must come before question prompt keys
+        "rate the readiness": json.dumps({
+            "sections": {
+                "problem_statement": {"readiness": "high", "evidence": "clear"},
+                "users_and_personas": {"readiness": "high", "evidence": "clear"},
+                "requirements": {"readiness": "high", "evidence": "clear"},
+                "acceptance_criteria": {"readiness": "high", "evidence": "clear"},
+                "scope_boundaries": {"readiness": "high", "evidence": "clear"},
+                "technical_constraints": {"readiness": "high", "evidence": "clear"},
+            },
+            "gaps": [],
+            "recommendation": "ready",
+        }),
+        "## Gaps to address": (
+            '{"questions": [{"question": "Who are the target users?",'
+            ' "options": ["developers", "PMs", "both"],'
+            ' "targets_section": "users_and_personas"}]}'
         ),
         "Propose 2-3": (
             '[{"name": "Simple", "description": "Minimal viable approach",'
@@ -245,6 +255,33 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
     """
     interrupt_type = payload["type"]
 
+    if interrupt_type == "questions":
+        questions = payload.get("questions", [])
+        if not quiet:
+            confidence = payload.get("confidence", 0)
+            round_num = payload.get("round", 0)
+            print(  # noqa: T201
+                f"\nRound {round_num} | Confidence: {confidence}% | "
+                f"Threshold: 80%"
+            )
+        answers = []
+        for i, q in enumerate(questions, 1):
+            if not quiet:
+                target = q.get("targets_section", "")
+                target_label = f" (targets: {target})" if target else ""
+                print(f"\nQuestion {i} of {len(questions)}{target_label}:")  # noqa: T201
+                print(f"  {q['question']}")  # noqa: T201
+                if q.get("options"):
+                    for j, opt in enumerate(q["options"], 1):
+                        print(f"    {j}. {opt}")  # noqa: T201
+                print("  (type 'q' to quit)")  # noqa: T201
+            response = await _async_input("> ")
+            if response.strip().lower() in ("q", "quit"):
+                raise _BrainstormQuit
+            answers.append(response)
+        return answers
+
+    # Legacy single-question format
     if interrupt_type == "question":
         if not quiet:
             print(f"\n{payload['question']}")  # noqa: T201
@@ -256,6 +293,39 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         return response
+
+    if interrupt_type == "confidence_assessment":
+        if not quiet:
+            confidence = payload.get("confidence", 0)
+            threshold = payload.get("threshold", 80)
+            print(f"\nConfidence Assessment: {confidence}% (threshold: {threshold}%)")  # noqa: T201
+            for section, info in payload.get("sections", {}).items():
+                readiness = info.get("readiness", "?")
+                evidence = info.get("evidence", "")
+                markers = {"high": "✓", "medium": "~", "low": "✗"}
+                marker = markers.get(readiness, "?")
+                print(f"  {marker} {section}: {readiness.upper()} — {evidence}")  # noqa: T201
+            if payload.get("gaps"):
+                print("\nGaps:")  # noqa: T201
+                for gap in payload["gaps"]:
+                    print(f"  - {gap['section']}: {gap['description']}")  # noqa: T201
+            print("\n  (c)ontinue / (d)efer sections / (o)verride / (q)uit")  # noqa: T201
+        response = await _async_input("> ")
+        if response.strip().lower() in ("q", "quit"):
+            raise _BrainstormQuit
+        choice = response.strip().lower()
+        if choice in ("c", "continue"):
+            return "continue"
+        if choice in ("o", "override"):
+            return "override"
+        if choice.startswith("d"):
+            if not quiet:
+                print("Defer which sections? (comma-separated):")  # noqa: T201
+            sections_input = await _async_input("> ")
+            if sections_input.strip().lower() in ("q", "quit"):
+                raise _BrainstormQuit
+            return f"defer {sections_input.strip()}"
+        return "continue"
 
     if interrupt_type == "approaches":
         if not quiet:
@@ -332,14 +402,17 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
         "product_context": context.get("product_context", ""),
         "codebase_context": codebase,
         "transcript": [],
-        "coverage": {},
+        "section_readiness": {},
+        "confidence_score": 0,
+        "gaps": [],
+        "deferred_sections": [],
+        "round_number": 0,
         "approaches": [],
         "selected_approach": "",
         "design_sections": [],
         "current_section_idx": 0,
         "brief": "",
         "status": "exploring",
-        "iteration": 0,
         "brief_revision_count": 0,
     }
 
