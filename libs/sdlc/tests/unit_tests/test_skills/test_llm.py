@@ -157,3 +157,64 @@ async def test_anthropic_client_raises_after_max_retries():
 
         # Should have tried multiple times
         assert client._client.messages.create.call_count >= 3
+
+
+async def test_stub_client_ignores_cached_prefix():
+    """StubLLMClient works the same with or without cached_prefix."""
+    stub = StubLLMClient(responses={"hello": "world"})
+    result = await stub.generate("hello", cached_prefix="stable context")
+    assert result == "world"
+    assert stub.calls == [("hello", "")]
+
+
+async def test_anthropic_client_cached_prefix_sends_cache_control():
+    """AnthropicLLMClient sends cache_control breakpoint when cached_prefix is provided."""
+    mock_anthropic = MagicMock()
+
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text="cached response")]
+
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
+
+        client = AnthropicLLMClient(model="claude-sonnet-4-6", max_tokens=8192)
+        client._client.messages.create = AsyncMock(return_value=mock_response)
+
+        result = await client.generate(
+            "variable content", system="sys", cached_prefix="stable context"
+        )
+
+        assert result == "cached response"
+        call_kwargs = client._client.messages.create.call_args[1]
+        messages = call_kwargs["messages"]
+        # First message has cache_control on the cached prefix
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert messages[0]["content"][0]["text"] == "stable context"
+        # Assistant turn bridges the cached and variable content
+        assert messages[1]["role"] == "assistant"
+        # Variable content in the third message
+        assert messages[2]["role"] == "user"
+        assert messages[2]["content"] == "variable content"
+
+
+async def test_anthropic_client_no_cached_prefix_sends_simple_message():
+    """Without cached_prefix, AnthropicLLMClient sends a single user message."""
+    mock_anthropic = MagicMock()
+
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text="simple response")]
+
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
+
+        client = AnthropicLLMClient(model="claude-sonnet-4-6", max_tokens=8192)
+        client._client.messages.create = AsyncMock(return_value=mock_response)
+
+        result = await client.generate("just a prompt")
+
+        assert result == "simple response"
+        call_kwargs = client._client.messages.create.call_args[1]
+        messages = call_kwargs["messages"]
+        assert len(messages) == 1
+        assert messages[0] == {"role": "user", "content": "just a prompt"}

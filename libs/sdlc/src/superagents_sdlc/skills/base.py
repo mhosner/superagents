@@ -31,6 +31,7 @@ class SkillContext:
     artifact_dir: Path
     parameters: dict[str, Any] = field(default_factory=dict)
     trace_id: str = ""
+    cached_prefix: str | None = None
 
 
 class Artifact(BaseModel):

@@ -144,6 +144,27 @@ class PipelineOrchestrator:
         """
         return {**self._context, **(overrides or {})}
 
+    def _build_cached_prefix(self, params: dict[str, str]) -> str | None:
+        """Assemble the stable context shared across pipeline calls.
+
+        Args:
+            params: Merged context parameters.
+
+        Returns:
+            Concatenated stable context string, or None if empty.
+        """
+        parts = []
+        for key, header in [
+            ("tech_spec", "Technical specification"),
+            ("implementation_plan", "Implementation plan"),
+            ("user_stories", "User stories"),
+            ("prd", "PRD"),
+            ("product_context", "Product context"),
+        ]:
+            if params.get(key):
+                parts.append(f"## {header}\n{params[key]}")
+        return "\n\n".join(parts) if parts else None
+
     async def run_idea_to_code(  # noqa: PLR0913
         self,
         idea: str,
@@ -435,10 +456,16 @@ class PipelineOrchestrator:
             dev_params["user_stories_path"] = user_stories_path
             self._retry_context["user_stories"] = dev_params["user_stories"]
 
+        # Build cached prefix from stable context
+        cached_prefix = self._build_cached_prefix(dev_params)
+
         # Developer phase — direct call, no handoff (cold start)
         dev_dir = artifact_dir / "developer"
         dev_dir.mkdir(parents=True, exist_ok=True)
-        dev_context = SkillContext(artifact_dir=dev_dir, parameters=dev_params, trace_id="pipeline")
+        dev_context = SkillContext(
+            artifact_dir=dev_dir, parameters=dev_params, trace_id="pipeline",
+            cached_prefix=cached_prefix,
+        )
         dev_artifacts = await self._developer.run_plan_from_spec(dev_context)
         if on_phase_complete:
             on_phase_complete("developer", dev_artifacts)
@@ -446,7 +473,10 @@ class PipelineOrchestrator:
         # QA phase
         qa_dir = artifact_dir / "qa"
         qa_dir.mkdir(parents=True, exist_ok=True)
-        qa_context = SkillContext(artifact_dir=qa_dir, parameters={}, trace_id="pipeline")
+        qa_context = SkillContext(
+            artifact_dir=qa_dir, parameters={}, trace_id="pipeline",
+            cached_prefix=cached_prefix,
+        )
 
         qa_handoff = _get_handoff(self._qa, "developer")
         qa_artifacts = await self._qa.handle_handoff(qa_handoff, qa_context)

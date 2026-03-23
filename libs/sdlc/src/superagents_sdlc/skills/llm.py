@@ -20,12 +20,19 @@ class LLMClient(Protocol):
     The LLM client is a dumb pipe.
     """
 
-    async def generate(self, prompt: str, *, system: str = "") -> str:
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        cached_prefix: str | None = None,
+    ) -> str:
         """Generate a response from the LLM.
 
         Args:
             prompt: User prompt.
             system: Optional system prompt.
+            cached_prefix: Optional stable context to cache across calls.
 
         Returns:
             Raw response string.
@@ -56,12 +63,19 @@ class StubLLMClient:
         self._strict = strict
         self.calls: list[tuple[str, str]] = []
 
-    async def generate(self, prompt: str, *, system: str = "") -> str:
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        cached_prefix: str | None = None,
+    ) -> str:
         """Return a canned response matching a prompt substring.
 
         Args:
             prompt: User prompt to match against.
             system: System prompt (tracked but not matched).
+            cached_prefix: Ignored by stub.
 
         Returns:
             Matched response, empty string (non-strict), or raises ValueError (strict).
@@ -117,15 +131,23 @@ class AnthropicLLMClient:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._rate_limit_error = anthropic.RateLimitError
 
-    async def generate(self, prompt: str, *, system: str = "") -> str:
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        cached_prefix: str | None = None,
+    ) -> str:
         """Generate a response via the Anthropic API.
 
         Retries up to ``_MAX_RETRIES`` times on rate-limit errors with
-        exponential backoff.
+        exponential backoff. When ``cached_prefix`` is provided, sends
+        a multi-turn message with a cache breakpoint on the stable context.
 
         Args:
-            prompt: User prompt.
+            prompt: User prompt (variable content per call).
             system: Optional system prompt.
+            cached_prefix: Optional stable context to cache across calls.
 
         Returns:
             Raw response text.
@@ -133,10 +155,31 @@ class AnthropicLLMClient:
         Raises:
             anthropic.RateLimitError: If retries are exhausted.
         """
+        if cached_prefix:
+            messages: list[dict[str, object]] = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": cached_prefix,
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": "I'll analyze the provided context and produce the requested output.",
+                },
+                {"role": "user", "content": prompt},
+            ]
+        else:
+            messages = [{"role": "user", "content": prompt}]
+
         kwargs: dict[str, object] = {
             "model": self.model,
             "max_tokens": self._max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
         }
         if system:
             kwargs["system"] = system

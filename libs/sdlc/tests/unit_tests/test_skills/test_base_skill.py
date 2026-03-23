@@ -83,6 +83,19 @@ def test_skill_metadata_fields():
     assert skill.required_context == ["project"]
 
 
+def test_skill_context_cached_prefix_defaults_to_none(tmp_path):
+    context = SkillContext(artifact_dir=tmp_path, parameters={}, trace_id="t")
+    assert context.cached_prefix is None
+
+
+def test_skill_context_cached_prefix_can_be_set(tmp_path):
+    context = SkillContext(
+        artifact_dir=tmp_path, parameters={}, trace_id="t",
+        cached_prefix="stable context",
+    )
+    assert context.cached_prefix == "stable context"
+
+
 def test_artifact_json_round_trip():
     original = Artifact(path="/tmp/out.txt", artifact_type="prd", metadata={"author": "pm"})
     json_str = original.model_dump_json()

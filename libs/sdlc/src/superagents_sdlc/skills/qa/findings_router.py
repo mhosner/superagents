@@ -159,7 +159,9 @@ class FindingsRouter(BaseSkill):
             prompt_parts.append(f"## Code plan\n{params['code_plan']}")
 
         prompt = "\n\n".join(prompt_parts)
-        response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
+        response = await self._llm.generate(
+            prompt, system=_SYSTEM_PROMPT, cached_prefix=context.cached_prefix,
+        )
 
         try:
             manifest = extract_json(response)

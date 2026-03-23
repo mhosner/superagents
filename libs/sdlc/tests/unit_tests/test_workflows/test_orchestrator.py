@@ -345,6 +345,60 @@ async def test_plan_from_spec_with_user_stories(exporter, tmp_path):
     assert result.certification != "skipped"
 
 
+def test_orchestrator_builds_cached_prefix():
+    """_build_cached_prefix assembles stable context from parameters."""
+    orchestrator, _ = _make_orchestrator()
+    prefix = orchestrator._build_cached_prefix({
+        "tech_spec": "# Tech Spec\nREST API",
+        "implementation_plan": "## Tasks\n1. Build API",
+        "user_stories": "As a PM, I want dark mode",
+    })
+    assert "# Tech Spec" in prefix
+    assert "## Tasks" in prefix
+    assert "As a PM" in prefix
+
+
+def test_orchestrator_builds_cached_prefix_empty_when_no_context():
+    """_build_cached_prefix returns None when no stable context."""
+    orchestrator, _ = _make_orchestrator()
+    prefix = orchestrator._build_cached_prefix({})
+    assert prefix is None
+
+
+async def test_plan_from_spec_passes_cached_prefix_to_skills(exporter, tmp_path):
+    """Skill contexts in run_plan_from_spec have cached_prefix populated."""
+    orchestrator, stub_llm = _make_orchestrator()
+
+    plan_path = tmp_path / "input_plan.md"
+    plan_path.write_text("## Tasks\n1. Create model")
+    spec_path = tmp_path / "input_spec.md"
+    spec_path.write_text("# Tech Spec\nREST API")
+    stories_path = tmp_path / "input_stories.md"
+    stories_path.write_text("As a PM, I want dark mode")
+
+    # Track cached_prefix values passed to generate()
+    original_generate = stub_llm.generate
+    cached_prefixes: list[str | None] = []
+
+    async def tracking_generate(prompt, *, system="", cached_prefix=None):
+        cached_prefixes.append(cached_prefix)
+        return await original_generate(prompt, system=system)
+
+    stub_llm.generate = tracking_generate
+
+    await orchestrator.run_plan_from_spec(
+        implementation_plan_path=str(plan_path),
+        tech_spec_path=str(spec_path),
+        user_stories_path=str(stories_path),
+        artifact_dir=tmp_path / "output",
+    )
+
+    # At least one call should have a cached_prefix
+    prefixed_calls = [p for p in cached_prefixes if p is not None]
+    assert len(prefixed_calls) >= 1
+    assert "# Tech Spec" in prefixed_calls[0]
+
+
 async def test_plan_from_spec_without_user_stories_fails_qa(exporter, tmp_path):
     orchestrator, _ = _make_orchestrator()
 

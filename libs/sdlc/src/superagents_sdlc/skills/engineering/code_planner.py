@@ -6,6 +6,7 @@ and test cases following the RED-GREEN-REFACTOR cycle.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from superagents_sdlc.skills.base import Artifact, BaseSkill, SkillValidationError
@@ -122,6 +123,45 @@ follow top to bottom.
 """
 
 
+_PHASE_SYSTEM_PROMPT = """\
+You are a senior developer creating a TDD implementation plan for ONE PHASE \
+of a larger project. You are generating tasks for Phase {phase_number} of \
+{total_phases}.
+
+## Context
+
+The phases before this one have already been planned — their tasks are \
+provided below as context. You may reference functions, types, and test \
+fixtures created in prior phases.
+
+## Rules
+
+- Generate tasks ONLY for the current phase's scope
+- Continue task numbering from where the prior phase left off
+- Reference prior phase artifacts by name when building on them
+- Follow the same TDD format: failing test → implementation → passing verification
+- Each task must have a ### Task N: heading, checkboxes, and Run: commands
+- Each task should be 2-5 minutes of focused work
+"""
+
+
+def _extract_phases(impl_plan: str) -> list[str]:
+    """Split an implementation plan into phases by header markers.
+
+    Looks for ``## Phase N`` or ``### Phase N`` patterns. If no phase
+    headers are found, returns the entire plan as a single phase.
+
+    Args:
+        impl_plan: Raw implementation plan text.
+
+    Returns:
+        List of phase strings, one per phase.
+    """
+    splits = re.split(r"(?=^#{2,3}\s+Phase\s+\d)", impl_plan, flags=re.MULTILINE)
+    phases = [s.strip() for s in splits if s.strip()]
+    return phases if len(phases) > 1 else [impl_plan]
+
+
 class CodePlanner(BaseSkill):
     """Generate detailed TDD code plans."""
 
@@ -158,11 +198,50 @@ class CodePlanner(BaseSkill):
     async def execute(self, context: SkillContext) -> Artifact:
         """Generate a TDD code plan from the implementation plan and tech spec.
 
+        When the implementation plan contains multiple ``## Phase N`` sections,
+        generates one plan per phase and concatenates them. Single-phase plans
+        use a single LLM call.
+
         Args:
             context: Execution context with implementation plan and tech spec.
 
         Returns:
             Artifact pointing to the code plan output file.
+        """
+        params = context.parameters
+        plan = params["implementation_plan"]
+        phases = _extract_phases(plan)
+        is_revision = "revision_findings" in params
+
+        if len(phases) > 1 and is_revision and "previous_code" in params:
+            response = await self._revise_phased(context, phases)
+        elif len(phases) > 1 and not is_revision:
+            response = await self._generate_phased(context, phases)
+        else:
+            response = await self._generate_single(context)
+
+        output_path = context.artifact_dir / "code_plan.md"
+        output_path.write_text(response)
+
+        summary = (
+            f"Generated {len(phases)}-phase TDD code plan."
+            if len(phases) > 1
+            else "Generated TDD code plan."
+        )
+        return Artifact(
+            path=str(output_path),
+            artifact_type="code",
+            metadata={"spec_source": "implementation_plan", "summary": summary},
+        )
+
+    async def _generate_single(self, context: SkillContext) -> str:
+        """Generate a single code plan (original behavior).
+
+        Args:
+            context: Execution context.
+
+        Returns:
+            Raw LLM response.
         """
         params = context.parameters
         plan = params["implementation_plan"]
@@ -197,13 +276,112 @@ class CodePlanner(BaseSkill):
                 prompt_parts.append(f"## Revision findings\n{params['revision_findings']}")
 
         prompt = "\n\n".join(prompt_parts)
-        response = await self._llm.generate(prompt, system=system)
-
-        output_path = context.artifact_dir / "code_plan.md"
-        output_path.write_text(response)
-
-        return Artifact(
-            path=str(output_path),
-            artifact_type="code",
-            metadata={"spec_source": "implementation_plan"},
+        return await self._llm.generate(
+            prompt, system=system, cached_prefix=context.cached_prefix,
         )
+
+    async def _generate_phased(
+        self, context: SkillContext, phases: list[str],
+    ) -> str:
+        """Generate a code plan one phase at a time.
+
+        Each phase call includes the prior phases' output so later tasks
+        can reference earlier functions and test fixtures.
+
+        Args:
+            context: Execution context.
+            phases: List of phase strings from the implementation plan.
+
+        Returns:
+            Concatenated plan text.
+        """
+        params = context.parameters
+        spec = params["tech_spec"]
+        accumulated = ""
+
+        for i, phase in enumerate(phases):
+            prompt_parts = [
+                f"## Current phase\n{phase}",
+                f"## Technical specification\n{spec}",
+            ]
+            if "user_stories" in params:
+                prompt_parts.append(f"## User stories\n{params['user_stories']}")
+            if accumulated:
+                prompt_parts.append(f"## Prior phases output\n{accumulated}")
+
+            prompt = "\n\n".join(prompt_parts)
+            phase_response = await self._llm.generate(
+                prompt,
+                system=_PHASE_SYSTEM_PROMPT.format(
+                    phase_number=i + 1, total_phases=len(phases),
+                ),
+                cached_prefix=context.cached_prefix,
+            )
+            accumulated = f"{accumulated}\n\n{phase_response}".strip()
+
+        return accumulated
+
+    async def _revise_phased(
+        self, context: SkillContext, phases: list[str],
+    ) -> str:
+        """Revise only the phases containing flagged tasks.
+
+        Splits the previous code plan output by ``### Task`` headers to
+        determine which tasks belong to which phase. Phases with flagged
+        tasks are regenerated; unflagged phases are preserved verbatim.
+
+        Args:
+            context: Execution context with revision_findings and previous_code.
+            phases: List of phase strings from the implementation plan.
+
+        Returns:
+            Concatenated revised plan text.
+        """
+        params = context.parameters
+        findings = params["revision_findings"]
+        previous = params["previous_code"]
+
+        # Determine which task numbers are flagged
+        flagged = set()
+        for match in re.finditer(r"Task\s+(\d+)", findings):
+            flagged.add(int(match.group(1)))
+
+        # Split previous output into task blocks and map to phase indices
+        task_blocks = re.split(r"(?=^### Task\s+\d+)", previous, flags=re.MULTILINE)
+        task_blocks = [b for b in task_blocks if b.strip()]
+
+        # Assign tasks to phases based on position
+        tasks_per_phase = max(1, len(task_blocks) // len(phases))
+        phase_tasks: dict[int, list[str]] = {}
+        phase_flagged: dict[int, bool] = {}
+        for idx, block in enumerate(task_blocks):
+            phase_idx = min(idx // tasks_per_phase, len(phases) - 1)
+            phase_tasks.setdefault(phase_idx, []).append(block)
+            task_match = re.search(r"### Task\s+(\d+)", block)
+            if task_match and int(task_match.group(1)) in flagged:
+                phase_flagged[phase_idx] = True
+
+        # Build output — preserve unflagged, regenerate flagged
+        parts = []
+        for i, phase in enumerate(phases):
+            if phase_flagged.get(i):
+                phase_content = "".join(phase_tasks.get(i, []))
+                prompt_parts = [
+                    f"## PREVIOUS PHASE (revise flagged tasks)\n{phase_content}",
+                    f"## Current phase spec\n{phase}",
+                    f"## Technical specification\n{params['tech_spec']}",
+                    f"## QA FINDINGS\n{findings}",
+                ]
+                if parts:
+                    prompt_parts.append(f"## Prior phases\n{''.join(parts)}")
+                prompt = "\n\n".join(prompt_parts)
+                revised = await self._llm.generate(
+                    prompt,
+                    system=_REVISION_SYSTEM_PROMPT,
+                    cached_prefix=context.cached_prefix,
+                )
+                parts.append(revised)
+            else:
+                parts.append("".join(phase_tasks.get(i, [])))
+
+        return "\n\n".join(p.strip() for p in parts if p.strip())

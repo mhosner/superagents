@@ -101,7 +101,9 @@ class PrioritizationEngine(BaseSkill):
             prompt_parts.append(f"## Design Brief\n{params['brief']}")
 
         prompt = "\n\n".join(prompt_parts)
-        response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
+        response = await self._llm.generate(
+            prompt, system=_SYSTEM_PROMPT, cached_prefix=context.cached_prefix,
+        )
 
         output_path = context.artifact_dir / "prioritization.md"
         output_path.write_text(response)
