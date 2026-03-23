@@ -79,12 +79,19 @@ class AnthropicLLMClient:
         model: Anthropic model identifier.
     """
 
-    def __init__(self, *, model: str = "claude-sonnet-4-6", api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model: str = "claude-sonnet-4-6",
+        api_key: str | None = None,
+        max_tokens: int = 16384,
+    ) -> None:
         """Initialize with model and optional API key.
 
         Args:
             model: Anthropic model to use.
             api_key: API key. Falls back to ``ANTHROPIC_API_KEY`` env var if omitted.
+            max_tokens: Maximum tokens for API responses (default 16384).
 
         Raises:
             ImportError: If the ``anthropic`` package is not installed.
@@ -99,6 +106,7 @@ class AnthropicLLMClient:
             raise ImportError(msg) from None
 
         self.model = model
+        self._max_tokens = max_tokens
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
 
     async def generate(self, prompt: str, *, system: str = "") -> str:
@@ -113,7 +121,7 @@ class AnthropicLLMClient:
         """
         kwargs: dict[str, object] = {
             "model": self.model,
-            "max_tokens": 4096,
+            "max_tokens": self._max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }
         if system:

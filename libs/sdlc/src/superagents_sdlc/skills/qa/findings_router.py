@@ -12,6 +12,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from superagents_sdlc.skills.base import Artifact, BaseSkill, SkillValidationError
+from superagents_sdlc.skills.json_utils import extract_json
 
 if TYPE_CHECKING:
     from superagents_sdlc.skills.base import SkillContext
@@ -160,17 +161,9 @@ class FindingsRouter(BaseSkill):
         prompt = "\n\n".join(prompt_parts)
         response = await self._llm.generate(prompt, system=_SYSTEM_PROMPT)
 
-        # Strip markdown fences if the LLM wraps JSON in ```json blocks
-        cleaned = response.strip()
-        if cleaned.startswith("```"):
-            lines = cleaned.splitlines()
-            cleaned = "\n".join(lines[1:])
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3].strip()
-
         try:
-            manifest = json.loads(cleaned)
-        except json.JSONDecodeError as exc:
+            manifest = extract_json(response)
+        except ValueError as exc:
             msg = f"Failed to parse routing manifest as JSON: {exc}"
             raise ValueError(msg) from exc
 

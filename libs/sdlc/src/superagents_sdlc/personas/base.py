@@ -11,6 +11,7 @@ from superagents.telemetry import handoff_span, skill_span
 from superagents_sdlc.handoffs.contract import HandoffResult, PersonaHandoff
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any
 
     from superagents_sdlc.handoffs.transport import Transport
@@ -46,6 +47,7 @@ class BasePersona(ABC):
         self.skills = skills
         self.policy_engine = policy_engine
         self.transport = transport
+        self.on_skill_complete: Callable[[str, str, Any], None] | None = None
 
     async def execute_skill(self, skill_name: str, context: SkillContext) -> Artifact:
         """Execute a skill by name with telemetry.
@@ -78,7 +80,10 @@ class BasePersona(ABC):
         with skill_span(skill_name) as span:
             try:
                 skill.validate(context)
-                return await skill.execute(context)
+                artifact = await skill.execute(context)
+                if self.on_skill_complete is not None:
+                    self.on_skill_complete(self.name, skill_name, artifact)
+                return artifact
             except Exception:
                 span.set_status(trace.StatusCode.ERROR)
                 raise

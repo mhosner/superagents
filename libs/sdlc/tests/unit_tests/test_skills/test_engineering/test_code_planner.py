@@ -143,3 +143,11 @@ async def test_code_planner_includes_codebase_context(tmp_path):
     prompt = stub.calls[0][0]
     assert "## Codebase Context" in prompt
     assert "FastAPI" in prompt
+
+
+def test_code_planner_prompt_requires_component_level_granularity():
+    """System prompt must mandate one task per component from the spec."""
+    from superagents_sdlc.skills.engineering.code_planner import _SYSTEM_PROMPT
+
+    lower = _SYSTEM_PROMPT.lower()
+    assert "one task per" in lower or "separate task" in lower

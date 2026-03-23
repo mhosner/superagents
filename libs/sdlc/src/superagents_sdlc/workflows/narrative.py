@@ -112,6 +112,119 @@ class NarrativeWriter:
             f.write(f"- {section_count} design sections approved\n")
             f.write(f"- Brief: `{brief_path}`\n")
 
+    def record_skill_execution(
+        self,
+        persona_name: str,
+        skill_name: str,
+        artifact_summary: str,
+        context_note: str = "",
+    ) -> None:
+        """Record an individual skill execution within a phase.
+
+        Args:
+            persona_name: Display name of the persona (e.g., "PM").
+            skill_name: Name of the skill executed.
+            artifact_summary: Short summary of what the skill produced.
+            context_note: Optional additional context about inputs or decisions.
+        """
+        lines = [f"\n**{persona_name} → {skill_name}**: {artifact_summary}"]
+        if context_note:
+            lines.append(f" {context_note}")
+        lines.append("\n")
+        with self._path.open("a") as f:
+            f.writelines(lines)
+
+    def record_qa_findings(
+        self,
+        total_checks: int,
+        pass_count: int,
+        fail_count: int,
+        partial_count: int,
+        key_findings: list[dict],
+        certification: str,
+    ) -> None:
+        """Record detailed QA compliance results and certification.
+
+        Args:
+            total_checks: Total number of compliance checks run.
+            pass_count: Number of checks that passed.
+            fail_count: Number of checks that failed.
+            partial_count: Number of partially passing checks.
+            key_findings: List of dicts with id, summary, and severity keys.
+            certification: Certification rating string.
+        """
+        lines = [
+            f"\n**QA Compliance Results:** {total_checks} checks"
+            f" — {pass_count} PASS, {fail_count} FAIL, {partial_count} PARTIAL\n",
+        ]
+        if key_findings:
+            lines.append("\n**Key Findings:**\n")
+            for finding in key_findings:
+                fid = finding.get("id", "?")
+                severity = finding.get("severity", "?")
+                summary = finding.get("summary", "")
+                lines.append(f"- {fid} [{severity}]: {summary}\n")
+        lines.append(f"\n**Certification: {certification}**\n")
+        with self._path.open("a") as f:
+            f.writelines(lines)
+
+    def record_findings_routing(
+        self,
+        routing: dict,
+        cascade_personas: list[str],
+    ) -> None:
+        """Record how findings were classified and routed to personas.
+
+        Args:
+            routing: Routing manifest mapping persona names to finding lists.
+            cascade_personas: Ordered list of personas in the retry cascade.
+        """
+        total = sum(len(items) for items in routing.values())
+        # Display names: product_manager → Product Manager, etc.
+        display = {
+            "product_manager": "Product Manager",
+            "architect": "Architect",
+            "developer": "Developer",
+        }
+        lines = [f"\n**Findings Routing:** {total} findings classified\n"]
+        for persona_key in ("product_manager", "architect", "developer"):
+            count = len(routing.get(persona_key, []))
+            label = display.get(persona_key, persona_key)
+            lines.append(f"- {label}: {count}\n")
+        cascade_display = [display.get(p, p) for p in cascade_personas]
+        lines.append(f"\n**Cascade:** {' → '.join(cascade_display)}\n")
+        with self._path.open("a") as f:
+            f.writelines(lines)
+
+    def record_retry_start(
+        self,
+        pre_retry_certification: str,
+        finding_count: int,
+        persona_breakdown: dict[str, int],
+    ) -> None:
+        """Record why an automated retry is starting.
+
+        Args:
+            pre_retry_certification: Certification before the retry.
+            finding_count: Total number of required fixes.
+            persona_breakdown: Map of persona name to finding count.
+        """
+        display = {
+            "product_manager": "Product Manager",
+            "architect": "Architect",
+            "developer": "Developer",
+        }
+        lines = [
+            f"\n**Trigger:** QA certified {pre_retry_certification}"
+            f" with {finding_count} required fixes.\n",
+        ]
+        for persona_key, count in persona_breakdown.items():
+            if count > 0:
+                label = display.get(persona_key, persona_key)
+                lines.append(f"- {label}: {count}\n")
+        with self._path.open("a") as f:
+            f.writelines(lines)
+
     def record_final_result(self, certification: str, total_passes: int) -> None:
         """Write the final result summary.
 

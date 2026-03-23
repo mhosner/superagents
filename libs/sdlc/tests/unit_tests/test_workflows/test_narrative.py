@@ -124,6 +124,113 @@ def test_narrative_record_brainstorm_summary(tmp_path: Path):
     assert "design_brief.md" in content
 
 
+def test_narrative_record_skill_execution(tmp_path: Path):
+    writer = NarrativeWriter(tmp_path, "test")
+    writer.start_pass(1, "Initial Run")
+    writer.record_skill_execution(
+        persona_name="PM",
+        skill_name="prd_generator",
+        artifact_summary="Generated PRD for dark mode toggle with 5 requirements.",
+        context_note="Brief provided as primary input.",
+    )
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "**PM → prd_generator**" in content
+    assert "Generated PRD for dark mode toggle" in content
+    assert "Brief provided as primary input." in content
+
+
+def test_narrative_record_skill_execution_no_context(tmp_path: Path):
+    writer = NarrativeWriter(tmp_path, "test")
+    writer.start_pass(1, "Initial Run")
+    writer.record_skill_execution(
+        persona_name="Developer",
+        skill_name="code_planner",
+        artifact_summary="Produced TDD code plan with 6 tasks.",
+    )
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "**Developer → code_planner**" in content
+    assert "Produced TDD code plan" in content
+
+
+def test_narrative_record_qa_findings(tmp_path: Path):
+    writer = NarrativeWriter(tmp_path, "test")
+    writer.start_pass(1, "Initial Run")
+    writer.record_qa_findings(
+        total_checks=22,
+        pass_count=8,
+        fail_count=6,
+        partial_count=8,
+        key_findings=[
+            {"id": "RF-1", "summary": "GraphBuilder has no implementation task", "severity": "CRITICAL"},
+            {"id": "RF-5", "summary": "Atomic write recovery has no task", "severity": "HIGH"},
+        ],
+        certification="NEEDS WORK",
+    )
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "22 checks" in content
+    assert "8 PASS" in content
+    assert "6 FAIL" in content
+    assert "8 PARTIAL" in content
+    assert "RF-1" in content
+    assert "CRITICAL" in content
+    assert "GraphBuilder" in content
+    assert "RF-5" in content
+    assert "HIGH" in content
+    assert "Certification: NEEDS WORK" in content
+
+
+def test_narrative_record_findings_routing(tmp_path: Path):
+    writer = NarrativeWriter(tmp_path, "test")
+    writer.start_pass(1, "Initial Run")
+    writer.record_findings_routing(
+        routing={
+            "product_manager": [],
+            "architect": [{"id": "RF-2", "summary": "Spec gap"}],
+            "developer": [
+                {"id": "RF-1", "summary": "Missing task"},
+                {"id": "RF-3", "summary": "No error handling"},
+            ],
+        },
+        cascade_personas=["architect", "developer"],
+    )
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "Findings Routing" in content
+    assert "Product Manager: 0" in content
+    assert "Architect: 1" in content
+    assert "Developer: 2" in content
+    assert "Cascade:" in content
+    assert "Architect" in content and "Developer" in content
+
+
+def test_narrative_record_findings_routing_developer_only(tmp_path: Path):
+    writer = NarrativeWriter(tmp_path, "test")
+    writer.start_pass(1, "Initial Run")
+    writer.record_findings_routing(
+        routing={
+            "product_manager": [],
+            "architect": [],
+            "developer": [{"id": "RF-1", "summary": "Missing task"}],
+        },
+        cascade_personas=["developer"],
+    )
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "Developer: 1" in content
+    assert "Cascade:" in content
+
+
+def test_narrative_record_retry_start(tmp_path: Path):
+    writer = NarrativeWriter(tmp_path, "test")
+    writer.record_retry_start(
+        pre_retry_certification="NEEDS WORK",
+        finding_count=13,
+        persona_breakdown={"product_manager": 0, "architect": 0, "developer": 13},
+    )
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "NEEDS WORK" in content
+    assert "13" in content
+    assert "Developer: 13" in content
+
+
 def test_full_narrative_flow(tmp_path: Path):
     writer = NarrativeWriter(tmp_path, 'idea-to-code "Add dark mode"')
 

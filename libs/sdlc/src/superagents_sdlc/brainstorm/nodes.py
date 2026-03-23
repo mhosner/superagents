@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from langgraph.types import interrupt
 
+from superagents_sdlc.skills.json_utils import extract_json
+
 from superagents_sdlc.brainstorm.prompts import (
     APPROACHES_PROMPT,
     BRAINSTORM_SYSTEM,
@@ -27,44 +29,8 @@ _COVERAGE_DIMENSIONS = [
     "users", "problem", "scope", "constraints", "integrations", "success_metrics",
 ]
 
-
-def _extract_json(raw: str) -> Any:
-    """Extract JSON from LLM response that may contain markdown fences or prose.
-
-    Args:
-        raw: Raw LLM response text.
-
-    Returns:
-        Parsed JSON object.
-
-    Raises:
-        ValueError: If no valid JSON found.
-    """
-    text = raw.strip()
-
-    # Strip markdown code fences
-    if text.startswith("```"):
-        lines = text.splitlines()
-        text = "\n".join(lines[1:])
-        if text.endswith("```"):
-            text = text[:-3].strip()
-
-    # Try parsing as-is first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Find first { or [ and try parsing from there
-    for i, ch in enumerate(text):
-        if ch in ("{", "["):
-            try:
-                return json.loads(text[i:])
-            except json.JSONDecodeError:
-                continue
-
-    msg = f"No valid JSON found in LLM response: {raw[:200]}"
-    raise ValueError(msg)
+# Re-export for backward compatibility; new code should import from json_utils.
+_extract_json = extract_json
 
 MAX_QUESTION_ROUNDS = 4
 MAX_BRIEF_REVISIONS = 2

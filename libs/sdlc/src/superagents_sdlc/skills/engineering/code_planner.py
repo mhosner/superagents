@@ -72,6 +72,8 @@ Expected: PASS
 step count — config changes, refactors, and integration tasks may have fewer \
 or more steps
 - Each task should be 2-5 minutes of focused work
+- Create one task per distinct component, endpoint, or module in the spec — never \
+bundle multiple components into a single task
 - Tasks are ordered by dependency
 - File paths are proposals — use realistic paths based on the tech spec
 """

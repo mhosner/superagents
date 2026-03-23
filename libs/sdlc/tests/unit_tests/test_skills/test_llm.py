@@ -1,5 +1,7 @@
 """Tests for LLMClient protocol and StubLLMClient."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from superagents_sdlc.skills.llm import LLMClient, StubLLMClient
@@ -38,3 +40,23 @@ async def test_stub_llm_strict_still_matches_normally():
     stub = StubLLMClient(responses={"prd": "generated PRD"}, strict=True)
     result = await stub.generate("Please write a prd for feature X")
     assert result == "generated PRD"
+
+
+def test_anthropic_client_default_max_tokens():
+    """AnthropicLLMClient defaults to 16384 max_tokens."""
+    mock_anthropic = MagicMock()
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
+
+        client = AnthropicLLMClient(model="claude-sonnet-4-6")
+        assert client._max_tokens == 16384
+
+
+def test_anthropic_client_custom_max_tokens():
+    """AnthropicLLMClient accepts a custom max_tokens value."""
+    mock_anthropic = MagicMock()
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
+
+        client = AnthropicLLMClient(model="claude-sonnet-4-6", max_tokens=8192)
+        assert client._max_tokens == 8192

@@ -305,6 +305,56 @@ def test_codebase_context_flag_on_idea_to_code():
     assert args.codebase_context == "/path/context.md"
 
 
+def test_parse_max_tokens_flag():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "idea-to-code", "Add dark mode",
+        "--output-dir", "/tmp/out",
+        "--max-tokens", "8192",
+    ])
+    assert args.max_tokens == 8192
+
+
+def test_parse_max_tokens_default():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "idea-to-code", "Add dark mode",
+        "--output-dir", "/tmp/out",
+    ])
+    assert args.max_tokens == 16384
+
+
+def test_narrative_includes_skill_entries(tmp_path):
+    """Stub pipeline narrative includes skill-level entries from on_skill_complete."""
+    output_dir = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "idea-to-code",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
+            "--stub",
+            "--quiet",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        timeout=30,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    narrative = (output_dir / "pipeline_narrative.md").read_text()
+    # Should contain skill-level entries like "**product_manager → prd_generator**"
+    assert "→" in narrative
+    assert "product_manager" in narrative or "PM" in narrative
+    # Should contain QA findings detail
+    assert "Certification:" in narrative or "Certification" in narrative
+
+
 def test_interactive_quit(tmp_path):
     output_dir = tmp_path / "output"
     result = subprocess.run(

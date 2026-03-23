@@ -823,3 +823,97 @@ async def test_human_revision_empty_feedback(exporter, tmp_path):
     )
 
     assert result.retry_attempted is True
+
+
+# -- on_skill_complete callback tests --
+
+
+async def test_on_skill_complete_called_for_each_skill(exporter, tmp_path):
+    """on_skill_complete fires for every skill execution in the pipeline."""
+    orchestrator, _ = _make_orchestrator()
+    skills: list[tuple[str, str]] = []
+
+    def on_skill(persona_name, skill_name, artifact):
+        skills.append((persona_name, skill_name))
+
+    await orchestrator.run_idea_to_code(
+        "Add dark mode",
+        artifact_dir=tmp_path,
+        on_skill_complete=on_skill,
+    )
+
+    # Initial run: PM has 3 skills, Architect 2, Developer 1, QA 3 = 9
+    # Retry re-runs some subset. Just check we got at least 9 calls
+    # and that all four personas are represented.
+    assert len(skills) >= 9
+    persona_names = {s[0] for s in skills}
+    assert "product_manager" in persona_names
+    assert "architect" in persona_names
+    assert "developer" in persona_names
+    assert "qa" in persona_names
+
+
+# -- narrative callback tests --
+
+
+async def test_on_qa_complete_called_after_qa(exporter, tmp_path):
+    """on_qa_complete fires after the QA phase with certification and artifacts."""
+    orchestrator, _ = _make_orchestrator()
+    qa_calls: list[tuple[str, list]] = []
+
+    def on_qa(certification, artifacts):
+        qa_calls.append((certification, artifacts))
+
+    await orchestrator.run_idea_to_code(
+        "Add dark mode",
+        artifact_dir=tmp_path,
+        on_qa_complete=on_qa,
+    )
+
+    # At least one QA completion (initial), possibly two (with retry)
+    assert len(qa_calls) >= 1
+    cert, arts = qa_calls[0]
+    assert cert in ("READY", "NEEDS WORK", "FAILED", "unknown")
+    assert len(arts) >= 1
+
+
+async def test_on_findings_routed_called_before_retry(exporter, tmp_path):
+    """on_findings_routed fires with routing data before retry starts."""
+    orchestrator, _ = _make_orchestrator()
+    routing_calls: list[tuple[dict, list]] = []
+
+    def on_routed(routing, cascade):
+        routing_calls.append((routing, cascade))
+
+    await orchestrator.run_idea_to_code(
+        "Add dark mode",
+        artifact_dir=tmp_path,
+        on_findings_routed=on_routed,
+    )
+
+    # Stubs return NEEDS WORK, so retry fires, so routing callback fires
+    assert len(routing_calls) >= 1
+    routing, cascade = routing_calls[0]
+    assert isinstance(routing, dict)
+    assert isinstance(cascade, list)
+    assert len(cascade) >= 1
+
+
+async def test_on_retry_start_called_at_retry(exporter, tmp_path):
+    """on_retry_start fires at the beginning of a retry pass."""
+    orchestrator, _ = _make_orchestrator()
+    retry_calls: list[tuple[str, dict]] = []
+
+    def on_retry(pre_cert, routing):
+        retry_calls.append((pre_cert, routing))
+
+    await orchestrator.run_idea_to_code(
+        "Add dark mode",
+        artifact_dir=tmp_path,
+        on_retry_start=on_retry,
+    )
+
+    assert len(retry_calls) >= 1
+    pre_cert, routing = retry_calls[0]
+    assert pre_cert == "NEEDS WORK"
+    assert isinstance(routing, dict)

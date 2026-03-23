@@ -95,6 +95,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Dump PipelineResult as JSON to stdout.",
     )
     shared.add_argument(
+        "--max-tokens",
+        type=int,
+        default=16384,
+        help="Max tokens for LLM responses (default: 16384).",
+    )
+    shared.add_argument(
         "--stub",
         action="store_true",
         help="Use StubLLMClient instead of Anthropic (development testing only).",
@@ -301,7 +307,7 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
     else:
         from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
 
-        llm = AnthropicLLMClient(model=args.model)
+        llm = AnthropicLLMClient(model=args.model, max_tokens=args.max_tokens)
 
     # Load context
     context = _load_context(args.context_dir)
@@ -486,6 +492,111 @@ def _make_phase_callback(
     return on_phase
 
 
+def _make_skill_callback(
+    *,
+    narrative: NarrativeWriter,
+) -> callable:
+    """Build the on_skill_complete callback for narrative recording.
+
+    Args:
+        narrative: NarrativeWriter instance.
+
+    Returns:
+        Callback function for on_skill_complete.
+    """
+    def on_skill(persona_name: str, skill_name: str, artifact: Artifact) -> None:
+        summary = artifact.metadata.get("summary", "")
+        if not summary:
+            summary = f"Produced {artifact.artifact_type} artifact."
+        narrative.record_skill_execution(persona_name, skill_name, summary)
+
+    return on_skill
+
+
+def _make_qa_callback(
+    *,
+    narrative: NarrativeWriter,
+) -> callable:
+    """Build the on_qa_complete callback for narrative recording.
+
+    Args:
+        narrative: NarrativeWriter instance.
+
+    Returns:
+        Callback function for on_qa_complete.
+    """
+    def on_qa(certification: str, artifacts: list[Artifact]) -> None:
+        # Extract key findings from routing manifest if available
+        findings: list[dict] = []
+        for a in artifacts:
+            if a.artifact_type == "routing_manifest":
+                try:
+                    manifest = json.loads(Path(a.path).read_text())
+                    for items in manifest.get("routing", {}).values():
+                        for item in items:
+                            findings.append({
+                                "id": item.get("id", "?"),
+                                "summary": item.get("summary", ""),
+                                "severity": "HIGH",
+                            })
+                except (json.JSONDecodeError, KeyError):
+                    pass
+        narrative.record_qa_findings(
+            total_checks=0,
+            pass_count=0,
+            fail_count=0,
+            partial_count=0,
+            key_findings=findings,
+            certification=certification,
+        )
+
+    return on_qa
+
+
+def _make_routing_callback(
+    *,
+    narrative: NarrativeWriter,
+) -> callable:
+    """Build the on_findings_routed callback for narrative recording.
+
+    Args:
+        narrative: NarrativeWriter instance.
+
+    Returns:
+        Callback function for on_findings_routed.
+    """
+    def on_routed(routing: dict, cascade: list[str]) -> None:
+        narrative.record_findings_routing(routing, cascade)
+
+    return on_routed
+
+
+def _make_retry_callback(
+    *,
+    narrative: NarrativeWriter,
+) -> callable:
+    """Build the on_retry_start callback for narrative recording.
+
+    Args:
+        narrative: NarrativeWriter instance.
+
+    Returns:
+        Callback function for on_retry_start.
+    """
+    def on_retry(pre_certification: str, routing: dict) -> None:
+        total = sum(len(items) for items in routing.values())
+        breakdown = {
+            persona: len(items) for persona, items in routing.items()
+        }
+        narrative.record_retry_start(
+            pre_retry_certification=pre_certification,
+            finding_count=total,
+            persona_breakdown=breakdown,
+        )
+
+    return on_retry
+
+
 def _extract_findings(artifact: Artifact, findings: list[str] | None) -> list[str] | None:
     """Extract findings from a routing manifest artifact.
 
@@ -616,7 +727,7 @@ async def _run(args: argparse.Namespace) -> int:
     else:
         from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
 
-        llm = AnthropicLLMClient(model=args.model)
+        llm = AnthropicLLMClient(model=args.model, max_tokens=args.max_tokens)
 
     # Build policy engine
     config = PolicyConfig(autonomy_level=args.autonomy_level)
@@ -634,16 +745,24 @@ async def _run(args: argparse.Namespace) -> int:
     )
     narrative.start_pass(1, "Initial Run")
 
-    # Build phase callback
+    # Build callbacks
     seen_phases: list[str] = []
     retry_state: dict[str, bool] = {"started": False}
     on_phase = _make_phase_callback(
         quiet=args.quiet, narrative=narrative,
         seen_phases=seen_phases, retry_state=retry_state,
     )
+    on_skill = _make_skill_callback(narrative=narrative)
+    on_qa = _make_qa_callback(narrative=narrative)
+    on_routed = _make_routing_callback(narrative=narrative)
+    on_retry = _make_retry_callback(narrative=narrative)
 
     # Run the appropriate pipeline
-    result = await _run_pipeline(args, orchestrator, output_dir, on_phase)
+    result = await _run_pipeline(
+        args, orchestrator, output_dir, on_phase,
+        on_skill=on_skill, on_qa=on_qa,
+        on_routed=on_routed, on_retry=on_retry,
+    )
 
     # Interactive review loop or finalize
     if args.interactive:
@@ -669,11 +788,16 @@ async def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _run_pipeline(
+async def _run_pipeline(  # noqa: PLR0913
     args: argparse.Namespace,
     orchestrator: PipelineOrchestrator,
     output_dir: Path,
     on_phase: callable,
+    *,
+    on_skill: callable | None = None,
+    on_qa: callable | None = None,
+    on_routed: callable | None = None,
+    on_retry: callable | None = None,
 ) -> PipelineResult:
     """Dispatch to the appropriate pipeline method.
 
@@ -682,22 +806,33 @@ async def _run_pipeline(
         orchestrator: Pipeline orchestrator.
         output_dir: Artifact output directory.
         on_phase: Phase completion callback.
+        on_skill: Skill completion callback.
+        on_qa: QA completion callback.
+        on_routed: Findings routing callback.
+        on_retry: Retry start callback.
 
     Returns:
         Pipeline result.
     """
+    callbacks = {
+        "on_phase_complete": on_phase,
+        "on_skill_complete": on_skill,
+        "on_qa_complete": on_qa,
+        "on_findings_routed": on_routed,
+        "on_retry_start": on_retry,
+    }
     if args.command == "idea-to-code":
         return await orchestrator.run_idea_to_code(
             args.idea,
             artifact_dir=output_dir,
-            on_phase_complete=on_phase,
+            **callbacks,
         )
     if args.command == "spec-from-prd":
         return await orchestrator.run_spec_from_prd(
             args.prd_path,
             user_stories_path=args.user_stories,
             artifact_dir=output_dir,
-            on_phase_complete=on_phase,
+            **callbacks,
         )
     # plan-from-spec
     return await orchestrator.run_plan_from_spec(
@@ -705,7 +840,7 @@ async def _run_pipeline(
         tech_spec_path=args.spec,
         artifact_dir=output_dir,
         user_stories_path=args.user_stories,
-        on_phase_complete=on_phase,
+        **callbacks,
     )
 
 

@@ -114,6 +114,18 @@ class PipelineOrchestrator:
         self._registry.register(self._developer)
         self._registry.register(self._qa)
 
+    def _set_skill_callback(
+        self,
+        callback: Callable[[str, str, Artifact], None] | None,
+    ) -> None:
+        """Set the on_skill_complete callback on all personas.
+
+        Args:
+            callback: Callback or None to clear.
+        """
+        for persona in (self._pm, self._architect, self._developer, self._qa):
+            persona.on_skill_complete = callback
+
     def _merge_context(self, overrides: dict[str, str] | None = None) -> dict[str, str]:
         """Merge base context with optional call-time overrides.
 
@@ -125,13 +137,17 @@ class PipelineOrchestrator:
         """
         return {**self._context, **(overrides or {})}
 
-    async def run_idea_to_code(
+    async def run_idea_to_code(  # noqa: PLR0913
         self,
         idea: str,
         *,
         artifact_dir: Path,
         context_overrides: dict[str, str] | None = None,
         on_phase_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_skill_complete: Callable[[str, str, Artifact], None] | None = None,
+        on_qa_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_findings_routed: Callable[[dict, list[str]], None] | None = None,
+        on_retry_start: Callable[[str, dict], None] | None = None,
     ) -> PipelineResult:
         """Run full pipeline: PM -> Architect -> Developer -> QA.
 
@@ -139,14 +155,20 @@ class PipelineOrchestrator:
             idea: Feature idea or description.
             artifact_dir: Root directory for all artifacts.
             context_overrides: Optional overrides for project context.
-            on_phase_complete: Optional callback invoked after each phase with
-                the phase name and its produced artifacts.
+            on_phase_complete: Optional callback after each phase (name, artifacts).
+            on_skill_complete: Optional callback after each skill (persona, skill, artifact).
+            on_qa_complete: Optional callback after QA (certification, artifacts).
+            on_findings_routed: Optional callback after routing (routing dict, cascade list).
+            on_retry_start: Optional callback at retry start (pre-certification, routing dict).
 
         Returns:
             PipelineResult with all artifacts grouped by persona.
         """
         self._retry_context = {}
         ctx = self._merge_context(context_overrides)
+
+        # Wire skill-level callback to all personas
+        self._set_skill_callback(on_skill_complete)
 
         # PM phase
         pm_dir = artifact_dir / "pm"
@@ -214,6 +236,9 @@ class PipelineOrchestrator:
             ) if qa_artifacts else "skipped"
         )
 
+        if on_qa_complete:
+            on_qa_complete(certification, qa_artifacts)
+
         result = PipelineResult(
             artifacts=all_artifacts,
             pm=pm_artifacts,
@@ -229,11 +254,14 @@ class PipelineOrchestrator:
                 result=result,
                 artifact_dir=artifact_dir,
                 on_phase_complete=on_phase_complete,
+                on_qa_complete=on_qa_complete,
+                on_findings_routed=on_findings_routed,
+                on_retry_start=on_retry_start,
             )
 
         return result
 
-    async def run_spec_from_prd(
+    async def run_spec_from_prd(  # noqa: PLR0913
         self,
         prd_path: str,
         *,
@@ -241,6 +269,10 @@ class PipelineOrchestrator:
         artifact_dir: Path,
         context_overrides: dict[str, str] | None = None,
         on_phase_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_skill_complete: Callable[[str, str, Artifact], None] | None = None,
+        on_qa_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_findings_routed: Callable[[dict, list[str]], None] | None = None,
+        on_retry_start: Callable[[str, dict], None] | None = None,
     ) -> PipelineResult:
         """Run pipeline from PRD: Architect -> Developer -> QA.
 
@@ -260,6 +292,7 @@ class PipelineOrchestrator:
             PipelineResult with PM artifacts empty.
         """
         self._retry_context = {}
+        self._set_skill_callback(on_skill_complete)
         ctx = self._merge_context(context_overrides)
         prd_content = Path(prd_path).read_text()
         stories_content = Path(user_stories_path).read_text()
@@ -315,6 +348,9 @@ class PipelineOrchestrator:
             ) if qa_artifacts else "skipped"
         )
 
+        if on_qa_complete:
+            on_qa_complete(certification, qa_artifacts)
+
         result = PipelineResult(
             artifacts=all_artifacts,
             pm=[],
@@ -330,6 +366,9 @@ class PipelineOrchestrator:
                 result=result,
                 artifact_dir=artifact_dir,
                 on_phase_complete=on_phase_complete,
+                on_qa_complete=on_qa_complete,
+                on_findings_routed=on_findings_routed,
+                on_retry_start=on_retry_start,
             )
 
         return result
@@ -343,6 +382,10 @@ class PipelineOrchestrator:
         user_stories_path: str | None = None,
         context_overrides: dict[str, str] | None = None,
         on_phase_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_skill_complete: Callable[[str, str, Artifact], None] | None = None,
+        on_qa_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_findings_routed: Callable[[dict, list[str]], None] | None = None,
+        on_retry_start: Callable[[str, dict], None] | None = None,
     ) -> PipelineResult:
         """Run pipeline from spec: Developer -> QA.
 
@@ -356,13 +399,17 @@ class PipelineOrchestrator:
             user_stories_path: Optional path to user stories file. If omitted,
                 QA pre-flight will fail unless user_stories is in context_overrides.
             context_overrides: Optional overrides for project context.
-            on_phase_complete: Optional callback invoked after each phase with
-                the phase name and its produced artifacts.
+            on_phase_complete: Optional callback after each phase (name, artifacts).
+            on_skill_complete: Optional callback after each skill (persona, skill, artifact).
+            on_qa_complete: Optional callback after QA (certification, artifacts).
+            on_findings_routed: Optional callback after routing (routing dict, cascade list).
+            on_retry_start: Optional callback at retry start (pre-certification, routing dict).
 
         Returns:
             PipelineResult with PM and Architect artifacts empty.
         """
         self._retry_context = {}
+        self._set_skill_callback(on_skill_complete)
         ctx = self._merge_context(context_overrides)
         plan_content = Path(implementation_plan_path).read_text()
         spec_content = Path(tech_spec_path).read_text()
@@ -411,6 +458,9 @@ class PipelineOrchestrator:
             ) if qa_artifacts else "skipped"
         )
 
+        if on_qa_complete:
+            on_qa_complete(certification, qa_artifacts)
+
         result = PipelineResult(
             artifacts=all_artifacts,
             pm=[],
@@ -426,6 +476,9 @@ class PipelineOrchestrator:
                 result=result,
                 artifact_dir=artifact_dir,
                 on_phase_complete=on_phase_complete,
+                on_qa_complete=on_qa_complete,
+                on_findings_routed=on_findings_routed,
+                on_retry_start=on_retry_start,
             )
 
         return result
@@ -511,6 +564,9 @@ class PipelineOrchestrator:
         result: PipelineResult,
         artifact_dir: Path,
         on_phase_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_qa_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_findings_routed: Callable[[dict, list[str]], None] | None = None,
+        on_retry_start: Callable[[str, dict], None] | None = None,
     ) -> PipelineResult:
         """Re-invoke personas tagged in the routing manifest, then re-run QA.
 
@@ -524,6 +580,9 @@ class PipelineOrchestrator:
             result: The initial pipeline result (must have QA artifacts).
             artifact_dir: Root directory for artifacts (same as initial run).
             on_phase_complete: Optional progress callback.
+            on_qa_complete: Optional callback after QA re-run.
+            on_findings_routed: Optional callback after routing is determined.
+            on_retry_start: Optional callback at retry start.
 
         Returns:
             Updated PipelineResult with retry artifacts overwriting originals.
@@ -568,6 +627,15 @@ class PipelineOrchestrator:
                 triggered = True
             if triggered and persona in active_personas:
                 cascade.add(persona)
+
+        # Build ordered cascade list for callbacks
+        cascade_list = [p for p in self._PERSONA_ORDER if p in cascade]
+
+        # Fire narrative callbacks
+        if on_findings_routed:
+            on_findings_routed(routing, cascade_list)
+        if on_retry_start:
+            on_retry_start(result.certification, routing)
 
         # Save pre-retry state
         result.pre_retry_certification = result.certification
@@ -740,6 +808,9 @@ class PipelineOrchestrator:
             ) if qa_artifacts else "unknown"
         )
         result.certification = certification
+
+        if on_qa_complete:
+            on_qa_complete(certification, qa_artifacts)
 
         all_artifacts = result.pm + result.architect + result.developer + result.qa
         result.artifacts = all_artifacts
