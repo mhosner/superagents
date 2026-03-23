@@ -9,7 +9,7 @@ from typing import Protocol, runtime_checkable
 logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 5
-_BASE_DELAY = 2.0
+_BASE_DELAY = 20.0
 
 
 @runtime_checkable
