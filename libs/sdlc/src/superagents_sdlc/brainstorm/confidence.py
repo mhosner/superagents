@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 from langgraph.types import interrupt
 
-from superagents_sdlc.brainstorm.prompts import BRAINSTORM_SYSTEM
+from superagents_sdlc.brainstorm.prompts import (
+    BRAINSTORM_SYSTEM,
+    _build_brainstorm_cached_prefix,
+)
 from superagents_sdlc.skills.json_utils import extract_json
 
 if TYPE_CHECKING:
@@ -34,15 +37,6 @@ DEFAULT_CONFIDENCE_THRESHOLD = 80
 DEFAULT_MAX_ROUNDS = 10
 
 _ASSESSMENT_PROMPT = """\
-## Idea
-{idea}
-
-## Product context
-{product_context}
-
-## Codebase context
-{codebase_context}
-
 ## Decisions Made So Far
 
 The following decisions have been confirmed by the user during this brainstorm \
@@ -152,14 +146,19 @@ def make_estimate_confidence_node(
                 f"Deferred sections (do NOT rate): {', '.join(deferred)}"
             )
 
-        prompt = _ASSESSMENT_PROMPT.format(
+        cached_prefix = _build_brainstorm_cached_prefix(
             idea=state["idea"],
             product_context=state["product_context"],
             codebase_context=state["codebase_context"],
+        )
+
+        prompt = _ASSESSMENT_PROMPT.format(
             transcript=_format_transcript_for_assessment(state["transcript"]),
             deferred_note=deferred_note,
         )
-        raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
+        raw = await llm.generate(
+            prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix,
+        )
         parsed = extract_json(raw)
 
         section_readiness = parsed["sections"]

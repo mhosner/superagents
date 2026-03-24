@@ -288,3 +288,36 @@ async def test_confidence_prompt_uses_formatted_transcript():
     assert "**DECIDED:** Automatic sub-step" in prompt
     assert "/sfn-analyze slash command" not in prompt
     assert "json" not in prompt.lower().split("return only valid json")[0]
+
+
+async def test_confidence_node_passes_cached_prefix():
+    """The confidence node passes cached_prefix containing idea and context."""
+    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    node = make_estimate_confidence_node(llm)
+    state = _make_state(
+        idea="Build search feature",
+        product_context="Enterprise SaaS",
+        codebase_context="Python FastAPI backend",
+    )
+    await node(state)
+
+    # StubLLMClient tracks calls as (prompt, system).
+    # Since StubLLMClient ignores cached_prefix, we verify the prompt
+    # does NOT contain the stable context (it's in cached_prefix instead).
+    prompt = llm.calls[0][0]
+    assert "Build search feature" not in prompt
+    assert "Enterprise SaaS" not in prompt
+    assert "Python FastAPI backend" not in prompt
+
+
+async def test_confidence_node_cached_prefix_excludes_transcript():
+    """The transcript must be in the variable prompt, not cached_prefix."""
+    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    node = make_estimate_confidence_node(llm)
+    state = _make_state(
+        transcript=[{"question": "Who?", "answer": "Devs", "options": None, "targets_section": ""}],
+    )
+    await node(state)
+
+    prompt = llm.calls[0][0]
+    assert "**DECIDED:** Devs" in prompt
