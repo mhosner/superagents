@@ -18,7 +18,10 @@ QUESTION_PROMPT = """\
 ## Codebase context
 {codebase_context}
 
-## Previous Q&A
+## Decisions Made So Far
+
+The following decisions have been confirmed by the user during this brainstorm session. These are FINAL — do not contradict, reinterpret, or question them. Do not re-ask about decided topics.
+
 {transcript}
 
 ## Current section readiness
@@ -40,7 +43,10 @@ APPROACHES_PROMPT = """\
 ## Idea
 {idea}
 
-## Q&A transcript
+## Decisions Made So Far
+
+The following decisions have been confirmed by the user during this brainstorm session. These are FINAL — do not contradict, reinterpret, or question them. All proposed approaches must be consistent with these decisions.
+
 {transcript}
 
 ## Product context
@@ -61,7 +67,10 @@ DESIGN_SECTION_PROMPT = """\
 ## Selected approach
 {selected_approach}
 
-## Q&A transcript
+## Decisions Made So Far
+
+The following decisions have been confirmed by the user during this brainstorm session. These are FINAL — do not contradict, reinterpret, or question them. This section must reflect these decisions accurately.
+
 {transcript}
 
 ## Previously approved sections

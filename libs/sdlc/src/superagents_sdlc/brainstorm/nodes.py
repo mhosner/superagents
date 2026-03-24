@@ -10,6 +10,7 @@ from langgraph.types import interrupt
 
 from superagents_sdlc.skills.json_utils import extract_json
 
+from superagents_sdlc.brainstorm.confidence import _format_transcript_for_assessment
 from superagents_sdlc.brainstorm.prompts import (
     APPROACHES_PROMPT,
     BRAINSTORM_SYSTEM,
@@ -135,7 +136,7 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
             idea=state["idea"],
             product_context=state["product_context"],
             codebase_context=state["codebase_context"],
-            transcript=json.dumps(state["transcript"]),
+            transcript=_format_transcript_for_assessment(state["transcript"]),
             section_readiness=json.dumps(readiness),
             gaps=json.dumps(gaps),
         )
@@ -194,7 +195,7 @@ def make_propose_approaches_node(llm: LLMClient) -> Callable[..., Any]:
         # NOTE: On resume, this LLM call re-executes. Acceptable cost for simplicity.
         prompt = APPROACHES_PROMPT.format(
             idea=state["idea"],
-            transcript=json.dumps(state["transcript"]),
+            transcript=_format_transcript_for_assessment(state["transcript"]),
             product_context=state["product_context"],
             codebase_context=state["codebase_context"],
         )
@@ -241,7 +242,7 @@ def make_generate_design_section_node(llm: LLMClient) -> Callable[..., Any]:
         prompt = DESIGN_SECTION_PROMPT.format(
             idea=state["idea"],
             selected_approach=state["selected_approach"],
-            transcript=json.dumps(state["transcript"]),
+            transcript=_format_transcript_for_assessment(state["transcript"]),
             approved_sections=approved_text or "(none yet)",
             section_title=section_title,
         )
