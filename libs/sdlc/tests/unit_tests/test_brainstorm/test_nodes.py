@@ -433,3 +433,106 @@ def test_build_brainstorm_cached_prefix_returns_none_when_empty():
         codebase_context="",
     )
     assert prefix is None
+
+
+# -- Prompt caching wiring tests --
+
+
+class _SpyLLMClient:
+    """LLM stub that also captures cached_prefix for assertions."""
+
+    def __init__(self, *, response: str) -> None:
+        self.calls: list[tuple[str, str, str | None]] = []
+        self._response = response
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        cached_prefix: str | None = None,
+    ) -> str:
+        self.calls.append((prompt, system, cached_prefix))
+        return self._response
+
+
+async def test_question_node_passes_cached_prefix():
+    """generate_question sends idea/context in cached_prefix, not prompt."""
+    llm = _SpyLLMClient(
+        response='{"questions": [{"question": "Q?", "options": null, "targets_section": "requirements"}]}'
+    )
+    node = make_generate_question_node(llm)
+    state = _make_state(
+        idea="Build search",
+        product_context="Enterprise SaaS",
+        codebase_context="Python backend",
+        section_readiness={"requirements": {"readiness": "low", "evidence": "missing"}},
+        gaps=[{"section": "requirements", "description": "No details"}],
+    )
+    with patch(_INTERRUPT_PATH, return_value=["My answer"]):
+        await node(state)
+    prompt, _system, cached_prefix = llm.calls[0]
+    assert cached_prefix is not None
+    assert "Build search" in cached_prefix
+    assert "Enterprise SaaS" in cached_prefix
+    assert "Build search" not in prompt
+
+
+async def test_approaches_node_passes_cached_prefix():
+    """propose_approaches sends idea/context in cached_prefix, not prompt."""
+    llm = _SpyLLMClient(
+        response='[{"name": "Simple", "description": "d", "tradeoffs": "t"}]'
+    )
+    node = make_propose_approaches_node(llm)
+    state = _make_state(
+        idea="Build search",
+        product_context="Enterprise SaaS",
+        codebase_context="Python backend",
+        status="proposing",
+    )
+    with patch(_INTERRUPT_PATH, return_value="Simple"):
+        await node(state)
+    prompt, _system, cached_prefix = llm.calls[0]
+    assert cached_prefix is not None
+    assert "Build search" in cached_prefix
+    assert "Build search" not in prompt
+
+
+async def test_design_section_node_passes_cached_prefix():
+    """generate_design_section sends idea/context in cached_prefix."""
+    llm = _SpyLLMClient(response="## Problem\nContent here")
+    node = make_generate_design_section_node(llm)
+    state = _make_state(
+        idea="Build search",
+        product_context="Enterprise SaaS",
+        codebase_context="Python backend",
+        status="designing",
+        selected_approach="Simple",
+        current_section_idx=0,
+    )
+    with patch(_INTERRUPT_PATH, return_value="approve"):
+        await node(state)
+    prompt, _system, cached_prefix = llm.calls[0]
+    assert cached_prefix is not None
+    assert "Build search" in cached_prefix
+    assert "Build search" not in prompt
+
+
+async def test_synthesize_node_passes_cached_prefix():
+    """synthesize_brief sends idea in cached_prefix, not prompt."""
+    llm = _SpyLLMClient(response="# Design Brief\nFull content")
+    node = make_synthesize_brief_node(llm)
+    state = _make_state(
+        idea="Build search",
+        product_context="Enterprise SaaS",
+        codebase_context="Python backend",
+        status="synthesizing",
+        design_sections=[{"title": "T", "content": "C", "approved": True}],
+        selected_approach="Simple",
+    )
+    with patch(_INTERRUPT_PATH, return_value="approve"):
+        await node(state)
+    prompt, _system, cached_prefix = llm.calls[0]
+    assert cached_prefix is not None
+    assert "Build search" in cached_prefix
+    assert "Build search" not in prompt

@@ -39,15 +39,6 @@ def _build_brainstorm_cached_prefix(
     return "\n\n".join(parts) if parts else None
 
 QUESTION_PROMPT = """\
-## Idea
-{idea}
-
-## Product context
-{product_context}
-
-## Codebase context
-{codebase_context}
-
 ## Decisions Made So Far
 
 The following decisions have been confirmed by the user during this brainstorm \
@@ -72,9 +63,6 @@ Return as JSON: {{"questions": [{{"question": "...", "options": ["a", "b"] | nul
 """
 
 APPROACHES_PROMPT = """\
-## Idea
-{idea}
-
 ## Decisions Made So Far
 
 The following decisions have been confirmed by the user during this brainstorm \
@@ -83,21 +71,12 @@ All proposed approaches must be consistent with these decisions.
 
 {transcript}
 
-## Product context
-{product_context}
-
-## Codebase context
-{codebase_context}
-
 Propose 2-3 distinct implementation approaches. Each should have a clear name, \
 description, and honest tradeoffs section.
 Return as JSON array: [{{"name": "...", "description": "...", "tradeoffs": "..."}}]
 """
 
 DESIGN_SECTION_PROMPT = """\
-## Idea
-{idea}
-
 ## Selected approach
 {selected_approach}
 
@@ -117,9 +96,6 @@ Return the section content as markdown.
 """
 
 SYNTHESIZE_PROMPT = """\
-## Idea
-{idea}
-
 ## Selected approach
 {selected_approach}
 

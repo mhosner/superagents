@@ -16,6 +16,7 @@ from superagents_sdlc.brainstorm.prompts import (
     DESIGN_SECTIONS,
     QUESTION_PROMPT,
     SYNTHESIZE_PROMPT,
+    _build_brainstorm_cached_prefix,
 )
 from superagents_sdlc.skills.json_utils import extract_json
 
@@ -131,15 +132,17 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
         readiness = state.get("section_readiness", {})
         gaps = state.get("gaps", [])
 
-        prompt = QUESTION_PROMPT.format(
+        cached_prefix = _build_brainstorm_cached_prefix(
             idea=state["idea"],
             product_context=state["product_context"],
             codebase_context=state["codebase_context"],
+        )
+        prompt = QUESTION_PROMPT.format(
             transcript=_format_transcript_for_assessment(state["transcript"]),
             section_readiness=json.dumps(readiness),
             gaps=json.dumps(gaps),
         )
-        raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
+        raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)
         parsed = _extract_json(raw)
 
         questions = parsed.get("questions", [])
@@ -192,13 +195,15 @@ def make_propose_approaches_node(llm: LLMClient) -> Callable[..., Any]:
     async def propose_approaches(state: BrainstormState) -> dict[str, Any]:
         """Generate approaches and interrupt for human selection."""
         # NOTE: On resume, this LLM call re-executes. Acceptable cost for simplicity.
-        prompt = APPROACHES_PROMPT.format(
+        cached_prefix = _build_brainstorm_cached_prefix(
             idea=state["idea"],
-            transcript=_format_transcript_for_assessment(state["transcript"]),
             product_context=state["product_context"],
             codebase_context=state["codebase_context"],
         )
-        raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
+        prompt = APPROACHES_PROMPT.format(
+            transcript=_format_transcript_for_assessment(state["transcript"]),
+        )
+        raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)
         approaches = _extract_json(raw)
 
         selected = interrupt({
@@ -238,14 +243,18 @@ def make_generate_design_section_node(llm: LLMClient) -> Callable[..., Any]:
             if s.get("approved")
         )
 
-        prompt = DESIGN_SECTION_PROMPT.format(
+        cached_prefix = _build_brainstorm_cached_prefix(
             idea=state["idea"],
+            product_context=state["product_context"],
+            codebase_context=state["codebase_context"],
+        )
+        prompt = DESIGN_SECTION_PROMPT.format(
             selected_approach=state["selected_approach"],
             transcript=_format_transcript_for_assessment(state["transcript"]),
             approved_sections=approved_text or "(none yet)",
             section_title=section_title,
         )
-        content = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
+        content = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)
 
         response = interrupt({
             "type": "design_section",
@@ -304,12 +313,16 @@ def make_synthesize_brief_node(llm: LLMClient) -> Callable[..., Any]:
             )
             sections_text = f"{sections_text}\n\n{annotations}"
 
-        prompt = SYNTHESIZE_PROMPT.format(
+        cached_prefix = _build_brainstorm_cached_prefix(
             idea=state["idea"],
+            product_context=state["product_context"],
+            codebase_context=state["codebase_context"],
+        )
+        prompt = SYNTHESIZE_PROMPT.format(
             selected_approach=state["selected_approach"],
             sections=sections_text,
         )
-        brief = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)
+        brief = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)
 
         response = interrupt({
             "type": "brief",
