@@ -455,7 +455,23 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
 
         llm = AnthropicLLMClient(model=args.model, max_tokens=args.max_tokens)
 
+    # Spinner for LLM call feedback
+    if not args.quiet:
+        from superagents_sdlc.cli_spinner import Spinner  # noqa: PLC0415
+
+        spinner: Spinner | None = Spinner()
+        llm = _SpinnerLLMClient(llm, spinner)
+    else:
+        spinner = None
+
     # Load context
+    if spinner is not None:
+        import random  # noqa: PLC0415
+
+        from superagents_sdlc.cli_spinner import PHRASES  # noqa: PLC0415
+
+        spinner.start(random.choice(PHRASES))  # noqa: S311
+
     context = _load_context(args.context_dir)
     codebase = ""
     if args.codebase_context:
@@ -463,6 +479,9 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
 
     # Build and invoke graph
     graph = build_brainstorm_graph(llm)
+
+    if spinner is not None:
+        spinner.stop()
     config = {"configurable": {"thread_id": "brainstorm-cli"}}
 
     initial: dict[str, object] = {
