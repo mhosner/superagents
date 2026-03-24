@@ -114,7 +114,7 @@ Remove echo-first "list each decision" instructions from all templates (the stru
 
 **File:** `libs/sdlc/src/superagents_sdlc/brainstorm/nodes.py` (MODIFY)
 
-Each node that formats a prompt: reconstruct IdeaMemory from state, pass `idea_memory=idea_memory.format_for_prompt()` to `.format()`. Remove `_format_transcript_for_assessment` from prompt formatting calls (keep the import for transcript — it's still used for transcript storage, just not prompt injection).
+Each node that formats a prompt: reconstruct IdeaMemory from state, pass `idea_memory=idea_memory.format_for_prompt()` to `.format()`. Remove the `_format_transcript_for_assessment` import entirely — it is no longer called from any node (transcript storage uses raw list manipulation, not the formatter).
 
 ### 6. Write IdeaMemory to disk
 
@@ -160,11 +160,18 @@ Add to the existing `parts` loop so it's included in the cached prefix for all p
 
 ## What Does NOT Change
 
-- Transcript data schema — still exists, still updated, not passed to prompts
-- `_format_transcript_for_assessment()` function — still exists for transcript storage
+- Transcript data schema — still exists in state, still updated by `generate_question`, not passed to prompts
 - Confidence scoring math
 - CLI interrupt handler display logic
 - Graph routing logic
+
+## What Gets Removed
+
+- `_format_transcript_for_assessment()` in `confidence.py` — no production code calls it after this change. Remove the function and its 4 unit tests (`test_format_transcript_*`). The transcript formatter was a stepping stone; IdeaMemory replaces it structurally.
+- `_format_transcript_for_assessment` import in `nodes.py` — becomes unused after prompt changes.
+- Echo-first instructions in all prompts (`test_node_prompts_contain_echo_instruction`, `test_confidence_prompt_requires_echo_step`, `test_confidence_prompt_contains_critical_rules`, `test_confidence_prompt_evidence_quote_only`) — these tests validated the workaround that IdeaMemory replaces. Remove them.
+- `test_synthesize_node_includes_transcript` — asserts formatted transcript in prompt, no longer applies.
+- `test_confidence_prompt_uses_formatted_transcript` — same reason.
 
 ## Tests
 
@@ -175,9 +182,11 @@ Add to the existing `parts` loop so it's included in the cached prefix for all p
 - `test_format_for_prompt_empty` — returns "No decisions have been made yet."
 - `test_to_state_and_from_state` — round-trip through state serialization
 
-### State integration (2 tests)
+### State integration (2 tests + helper updates)
 - `test_explore_context_initializes_idea_memory` — `idea_memory` is `[]`, `idea_memory_counts` is `{"decision": 0, "rejection": 0}`
 - `test_brainstorm_state_field_count` — update existing test for new field count (16 -> 18)
+- Update `_make_state()` in `test_nodes.py` and `_make_state()` in `test_confidence.py` to include `idea_memory: []` and `idea_memory_counts: {"decision": 0, "rejection": 0}`
+- Update `_initial_state()` in `test_graph.py` to include the same two new fields
 
 ### Decision capture (3 tests)
 - `test_question_answer_adds_to_idea_memory` — answer a question, assert `idea_memory` has 1 entry with D1 ID and resolved answer text
