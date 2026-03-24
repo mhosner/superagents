@@ -15,6 +15,7 @@ from superagents_sdlc.brainstorm.prompts import (
     DESIGN_SECTION_PROMPT,
     DESIGN_SECTIONS,
     QUESTION_PROMPT,
+    SECTION_TITLES,
     SYNTHESIZE_PROMPT,
     _build_brainstorm_cached_prefix,
 )
@@ -31,16 +32,6 @@ _extract_json = extract_json
 
 MAX_BRIEF_REVISIONS = 2
 
-_SECTION_TITLES = {
-    "problem_statement": "Problem Statement & Goals",
-    "users_and_personas": "Target Users & Personas",
-    "requirements": "Requirements & User Stories",
-    "acceptance_criteria": "Acceptance Criteria",
-    "scope_boundaries": "Scope Boundaries & Out of Scope",
-    "technical_constraints": "Technical Constraints & Dependencies",
-}
-
-
 def _deferred_title(section: str) -> str:
     """Get display title for a deferred section.
 
@@ -50,7 +41,7 @@ def _deferred_title(section: str) -> str:
     Returns:
         Human-readable title.
     """
-    return _SECTION_TITLES.get(section, section.replace("_", " ").title())
+    return SECTION_TITLES.get(section, section.replace("_", " ").title())
 def _clean_option(text: str) -> str:
     """Strip leading letter prefix like ``a) `` or ``a. `` from an option.
 

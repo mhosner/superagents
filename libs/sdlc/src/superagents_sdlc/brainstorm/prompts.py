@@ -133,3 +133,12 @@ DESIGN_SECTIONS = [
     "Scope Boundaries & Out of Scope",
     "Technical Constraints & Dependencies",
 ]
+
+SECTION_TITLES = {
+    "problem_statement": "Problem Statement & Goals",
+    "users_and_personas": "Target Users & Personas",
+    "requirements": "Requirements & User Stories",
+    "acceptance_criteria": "Acceptance Criteria",
+    "scope_boundaries": "Scope Boundaries & Out of Scope",
+    "technical_constraints": "Technical Constraints & Dependencies",
+}
