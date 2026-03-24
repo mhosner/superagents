@@ -151,6 +151,74 @@ This project follows the Superpowers methodology:
 4. **Subagent review** — Two-stage: spec compliance, then code quality.
 5. **Finish cleanly** — Verify tests pass, present merge options, clean up.
 
+## LLM model assignment
+
+Each persona uses a specific LLM tier. Only Architect uses the fast model — all others
+need the strong model for structured output compliance and reasoning quality.
+
+| Persona / Skill | LLM | Why |
+| ---------------- | ----- | ----- |
+| PM (all skills) | strong (`llm`) | PRD and story quality |
+| Architect (TechSpecWriter, ImplementationPlanner) | fast (`effective_fast`) | Specs are well-structured by Haiku |
+| Developer (CodePlanner) | strong (`llm`) | Code plans need precise `### Task N:` format |
+| QA (all skills including FindingsRouter) | strong (`llm`) | Routing accuracy drives retry effectiveness |
+| Brainstorm | strong (`llm`) | Always |
+
+The `fast_llm` parameter on `QAPersona` is deprecated and ignored — kept for API compatibility.
+
+## LLM client features
+
+`AnthropicLLMClient` in `skills/llm.py` has three behaviors beyond basic message creation:
+
+- **Streaming**: When `max_tokens > 16384`, uses `messages.stream()` instead of `messages.create()` to avoid timeouts on large outputs. The default `max_tokens` is 16384 (set via `--max-tokens` CLI flag).
+- **Rate limit retry**: Retries up to 5 times with exponential backoff (base 20s) on `RateLimitError`. The org's rate limit is 30K input tokens/minute — a full pipeline run consumes this in 2-3 calls.
+- **Prompt caching**: When `cached_prefix` is passed to `generate()`, builds a multi-turn message with `cache_control: {"type": "ephemeral"}` on the stable prefix. Cached tokens are 90% cheaper and don't count against the input tokens/minute rate limit. The cache TTL is 5 minutes.
+
+`StubLLMClient` accepts but ignores `cached_prefix` — all existing tests work unchanged.
+
+## Prompt caching architecture
+
+The stable context shared across all pipeline calls is assembled once by
+`PipelineOrchestrator._build_cached_prefix()` and stored on `SkillContext.cached_prefix`.
+Every skill passes it through to `self._llm.generate(prompt, system=..., cached_prefix=context.cached_prefix)`.
+
+What's cached: tech spec, implementation plan, user stories, PRD, product context.
+What's NOT cached: code plan output, revision findings, compliance reports — these change per call.
+
+For a 4-phase plan, this means the first call is a cache miss (20K tokens), subsequent calls
+are cache hits (~3K variable tokens each). This fits a full pipeline run within one rate limit window.
+
+## Phased code plan generation
+
+When the implementation plan contains `## Phase N` headers, `CodePlanner` generates
+one plan per phase instead of one monolithic document. This prevents 32K+ token truncation
+on complex features.
+
+- `_extract_phases()` splits by `## Phase N` or `### Phase N` headers
+- `_generate_phased()` calls the LLM once per phase, passing prior phases' output as context
+- `_revise_phased()` on retry only regenerates phases containing QA-flagged tasks — unflagged phases are preserved verbatim
+- Single-phase plans (no phase headers) use the original single-call path
+- `_PHASE_SYSTEM_PROMPT` instructs the LLM to continue task numbering from prior phases
+
+## Revision prompt design
+
+When `revision_findings` is present in CodePlanner's context, the system prompt switches
+from "produce a plan" to "edit a plan" (`_REVISION_SYSTEM_PROMPT`). The previous plan is
+inserted at position 0 with "PRESERVE all unflagged tasks" framing. Findings go at the end
+with "ADD tasks to address each" framing. This prevents the LLM from rewriting the entire
+plan from scratch on retry.
+
+## QA certification calibration
+
+The validation report generator's certification guidance distinguishes:
+
+- **READY**: All requirements have implementation tasks with verification steps
+- **NEEDS WORK**: Gaps that can be fixed by adding/modifying tasks (completeness gaps). The automated retry loop fires on this.
+- **FAILED**: Fundamental problems requiring redesign (architecture contradictions, mutually exclusive criteria). Should be rare.
+
+"When in doubt between NEEDS WORK and FAILED, choose NEEDS WORK." This is in the system prompt
+to prevent QA from using FAILED for fixable gaps, which would skip the retry loop.
+
 ## Tech stack
 
 - **Runtime**: Python 3.12+
@@ -159,7 +227,7 @@ This project follows the Superpowers methodology:
 - **Linting**: ruff
 - **Type checking**: ty
 - **Telemetry**: opentelemetry-api, opentelemetry-sdk (via superagents SDK)
-- **LLM**: Anthropic API via `AnthropicLLMClient` (optional extra)
+- **LLM**: Anthropic API via `AnthropicLLMClient` (optional extra, with streaming + retry + caching)
 - **Brainstorm**: LangGraph StateGraph with `interrupt()` for HITL
 - **CI**: GitHub Actions
 
@@ -189,8 +257,8 @@ libs/sdlc/                           # SDLC integration package
 │   │   ├── developer.py             # Developer persona (plan → code via TDD)
 │   │   └── qa.py                    # QA persona (compliance + validation + findings routing)
 │   ├── skills/                      # Skill implementations
-│   │   ├── base.py                  # BaseSkill ABC + SkillContext + Artifact
-│   │   ├── llm.py                   # LLMClient protocol + StubLLMClient + AnthropicLLMClient
+│   │   ├── base.py                  # BaseSkill ABC + SkillContext (with cached_prefix) + Artifact
+│   │   ├── llm.py                   # LLMClient protocol + StubLLMClient + AnthropicLLMClient (streaming, retry, caching)
 │   │   ├── pm/                      # PrdGenerator, PrioritizationEngine, UserStoryWriter
 │   │   ├── engineering/             # TechSpecWriter, ImplementationPlanner, CodePlanner, plan_parser
 │   │   └── qa/                      # SpecComplianceChecker, ValidationReportGenerator, FindingsRouter

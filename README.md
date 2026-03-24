@@ -129,24 +129,27 @@ superagents/
 
 ## Status
 
-Active development. The SDLC integration package (`libs/sdlc`) implements four core personas, ten skills, an autonomy policy engine, A2A-shaped handoff system, pipeline orchestrator with automated QA retry, interactive CLI with human-in-the-loop, and a LangGraph brainstorm subgraph. 248 tests, all passing.
+Active development. The SDLC integration package (`libs/sdlc`) implements four core personas, eleven skills, an autonomy policy engine, A2A-shaped handoff system, pipeline orchestrator with automated QA retry, prompt caching, phased code plan generation, interactive CLI with human-in-the-loop, and a LangGraph brainstorm subgraph. 345 tests, all passing.
 
 ### What's built
 
 | Phase | What | Tests |
 | ----- | ---- | ----- |
 | 1 | OpenTelemetry instrumentation (spans for personas, skills, handoffs, approval gates) | 15 |
-| 2 | BasePersona ABC, BaseSkill contract, PolicyEngine, A2A handoff system, PersonaRegistry | 39 |
+| 2 | BasePersona ABC, BaseSkill contract, PolicyEngine, A2A handoff system, PersonaRegistry | 41 |
 | 3 | PM persona with LLM abstraction (PrdGenerator, PrioritizationEngine, UserStoryWriter) | 30 |
-| 4 | Architect + Developer personas (TechSpecWriter, ImplementationPlanner, CodePlanner) | 34 |
-| 5 | QA persona (SpecComplianceChecker, ValidationReportGenerator) | 29 |
+| 4 | Architect + Developer personas (TechSpecWriter, ImplementationPlanner, CodePlanner) | 43 |
+| 5 | QA persona (SpecComplianceChecker, ValidationReportGenerator) | 30 |
 | 6 | Executable plan format (plan parser, structured QA input, Superpowers format) | 9 |
 | 7 | Pipeline orchestrator (PipelineOrchestrator with named workflow methods) | 17 |
-| 8 | Standalone CLI + AnthropicLLMClient (argparse wrapper, `--stub` mode, `--json` output) | 14 |
-| 9 | QA feedback loop (FindingsRouter, automated single-retry pass with cascade) | 22 |
+| 8 | Standalone CLI + AnthropicLLMClient (argparse, `--stub`, `--json`, streaming, rate-limit retry) | 19 |
+| 9 | QA feedback loop (FindingsRouter, automated single-retry pass with cascade) | 23 |
 | 10 | Interactive CLI mode (human approval gates, free-text revision, NarrativeWriter) | 17 |
 | 11 | LangGraph brainstorm subgraph (HITL interrupt/resume, 6-section design brief) | 29 |
 | 12 | Brief-to-pipeline integration (`--brief`, `--codebase-context` flags) | 9 |
+| 13 | Pipeline hardening (model assignment tuning, NEEDS WORK/FAILED calibration, rich skill summaries) | 10 |
+| 14 | Prompt caching (Anthropic `cache_control` breakpoints, stable prefix across pipeline calls) | 5 |
+| 15 | Phased code plan generation (per-phase LLM calls, phased revision of flagged phases only) | 8 |
 
 ### What's next
 
