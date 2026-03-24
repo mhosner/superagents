@@ -540,47 +540,86 @@ async def test_synthesize_node_passes_cached_prefix():
     assert "Build search" not in prompt
 
 
-async def test_synthesize_node_includes_transcript():
-    """synthesize_brief passes formatted transcript to the prompt."""
-    llm = _SpyLLMClient(response="# Design Brief\nFull content")
-    node = make_synthesize_brief_node(llm)
-    state = _make_state(
-        idea="Build search",
-        product_context="Enterprise SaaS",
-        codebase_context="Python backend",
-        status="synthesizing",
-        design_sections=[{"title": "T", "content": "C", "approved": True}],
-        selected_approach="Simple",
-        transcript=[
-            {"question": "Storage?", "answer": "PostgreSQL", "options": None, "targets_section": "technical_constraints"},
-        ],
+async def test_question_prompt_contains_idea_memory():
+    """generate_question prompt uses IdeaMemory, not transcript."""
+    llm = _SpyLLMClient(
+        response='{"questions": [{"question": "Q?", "options": null, "targets_section": "requirements"}]}',
     )
+    node = make_generate_question_node(llm)
+    state = _make_state(
+        idea_memory=[{"id": "D1", "title": "Tech", "type": "decision", "text": "Use Go"}],
+        idea_memory_counts={"decision": 1, "rejection": 0},
+        idea="Build API",
+        section_readiness={"requirements": {"readiness": "low", "evidence": "missing"}},
+        gaps=[{"section": "requirements", "description": "No details"}],
+    )
+    with patch(_INTERRUPT_PATH, return_value=["answer"]):
+        await node(state)
 
+    prompt, _sys, _prefix = llm.calls[0]
+    assert "IdeaMemory" in prompt
+    assert "D1: Tech [decision]" in prompt
+    assert "**DECIDED:**" not in prompt
+
+
+async def test_approaches_prompt_contains_idea_memory():
+    """propose_approaches prompt uses IdeaMemory, not transcript."""
+    llm = _SpyLLMClient(
+        response='[{"name": "Simple", "description": "d", "tradeoffs": "t"}]',
+    )
+    node = make_propose_approaches_node(llm)
+    state = _make_state(
+        idea_memory=[{"id": "D1", "title": "Scope", "type": "decision", "text": "MVP only"}],
+        idea_memory_counts={"decision": 1, "rejection": 0},
+        idea="Build API",
+        status="proposing",
+    )
+    with patch(_INTERRUPT_PATH, return_value="Simple"):
+        await node(state)
+
+    prompt, _sys, _prefix = llm.calls[0]
+    assert "IdeaMemory" in prompt
+    assert "MVP only" in prompt
+
+
+async def test_section_prompt_contains_idea_memory():
+    """generate_design_section prompt uses IdeaMemory, not transcript."""
+    llm = _SpyLLMClient(response="## Problem\nContent")
+    node = make_generate_design_section_node(llm)
+    state = _make_state(
+        idea_memory=[{"id": "D1", "title": "Users", "type": "decision", "text": "DevOps engineers"}],
+        idea_memory_counts={"decision": 1, "rejection": 0},
+        idea="Build API",
+        status="designing",
+        selected_approach="Simple",
+        current_section_idx=0,
+    )
     with patch(_INTERRUPT_PATH, return_value="approve"):
         await node(state)
 
-    prompt, _system, _cached_prefix = llm.calls[0]
-    assert "**DECIDED:** PostgreSQL" in prompt
+    prompt, _sys, _prefix = llm.calls[0]
+    assert "IdeaMemory" in prompt
+    assert "DevOps engineers" in prompt
 
 
-def test_node_prompts_contain_echo_instruction():
-    """All transcript-consuming prompts require the LLM to list decisions."""
-    from superagents_sdlc.brainstorm.prompts import (
-        APPROACHES_PROMPT,
-        DESIGN_SECTION_PROMPT,
-        QUESTION_PROMPT,
-        SYNTHESIZE_PROMPT,
+async def test_synthesize_prompt_contains_idea_memory():
+    """synthesize_brief prompt uses IdeaMemory, not transcript."""
+    llm = _SpyLLMClient(response="# Design Brief\nFull content")
+    node = make_synthesize_brief_node(llm)
+    state = _make_state(
+        idea_memory=[{"id": "D1", "title": "Tech", "type": "decision", "text": "Use Rust"}],
+        idea_memory_counts={"decision": 1, "rejection": 0},
+        idea="Build API",
+        status="synthesizing",
+        design_sections=[{"title": "T", "content": "C", "approved": True}],
+        selected_approach="Simple",
     )
+    with patch(_INTERRUPT_PATH, return_value="approve"):
+        await node(state)
 
-    for name, template in [
-        ("QUESTION_PROMPT", QUESTION_PROMPT),
-        ("APPROACHES_PROMPT", APPROACHES_PROMPT),
-        ("DESIGN_SECTION_PROMPT", DESIGN_SECTION_PROMPT),
-        ("SYNTHESIZE_PROMPT", SYNTHESIZE_PROMPT),
-    ]:
-        assert "list each decision" in template, (
-            f"{name} missing 'list each decision' echo instruction"
-        )
+    prompt, _sys, _prefix = llm.calls[0]
+    assert "IdeaMemory" in prompt
+    assert "Use Rust" in prompt
 
 
 # -- IdeaMemory capture tests --

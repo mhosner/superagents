@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 from langgraph.types import interrupt
 
-from superagents_sdlc.brainstorm.confidence import _format_transcript_for_assessment
 from superagents_sdlc.brainstorm.idea_memory import IdeaMemory
 from superagents_sdlc.brainstorm.prompts import (
     APPROACHES_PROMPT,
@@ -87,6 +86,15 @@ def _resolve_answer(response: str, options: list[str] | None) -> str:
     return response
 
 
+def _idea_memory_from_state(state: BrainstormState) -> IdeaMemory:
+    """Reconstruct IdeaMemory from brainstorm state."""
+    return IdeaMemory.from_state(
+        state["idea"],
+        list(state.get("idea_memory", [])),
+        dict(state.get("idea_memory_counts", {"decision": 0, "rejection": 0})),
+    )
+
+
 def make_explore_context_node() -> Callable[..., Any]:
     """Create the explore_context node. No LLM needed.
 
@@ -132,7 +140,7 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
             codebase_context=state["codebase_context"],
         )
         prompt = QUESTION_PROMPT.format(
-            transcript=_format_transcript_for_assessment(state["transcript"]),
+            idea_memory=_idea_memory_from_state(state).format_for_prompt(),
             section_readiness=json.dumps(readiness),
             gaps=json.dumps(gaps),
         )
@@ -211,7 +219,7 @@ def make_propose_approaches_node(llm: LLMClient) -> Callable[..., Any]:
             codebase_context=state["codebase_context"],
         )
         prompt = APPROACHES_PROMPT.format(
-            transcript=_format_transcript_for_assessment(state["transcript"]),
+            idea_memory=_idea_memory_from_state(state).format_for_prompt(),
         )
         raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)
         approaches = _extract_json(raw)
@@ -260,7 +268,7 @@ def make_generate_design_section_node(llm: LLMClient) -> Callable[..., Any]:
         )
         prompt = DESIGN_SECTION_PROMPT.format(
             selected_approach=state["selected_approach"],
-            transcript=_format_transcript_for_assessment(state["transcript"]),
+            idea_memory=_idea_memory_from_state(state).format_for_prompt(),
             approved_sections=approved_text or "(none yet)",
             section_title=section_title,
         )
@@ -330,7 +338,7 @@ def make_synthesize_brief_node(llm: LLMClient) -> Callable[..., Any]:
         )
         prompt = SYNTHESIZE_PROMPT.format(
             selected_approach=state["selected_approach"],
-            transcript=_format_transcript_for_assessment(state["transcript"]),
+            idea_memory=_idea_memory_from_state(state).format_for_prompt(),
             sections=sections_text,
         )
         brief = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)

@@ -39,16 +39,11 @@ def _build_brainstorm_cached_prefix(
     return "\n\n".join(parts) if parts else None
 
 QUESTION_PROMPT = """\
-## Decisions Made So Far
+## IdeaMemory — Canonical Decisions
 
-The following decisions have been confirmed by the user during this brainstorm \
-session. These are FINAL — do not contradict, reinterpret, or question them. \
-Do not re-ask about decided topics.
+{idea_memory}
 
-{transcript}
-
-Before generating questions, list each decision the user has made. \
-Do not generate questions that contradict or re-ask these decisions.
+Do not ask about topics already decided in IdeaMemory.
 
 ## Current section readiness
 {section_readiness}
@@ -66,16 +61,11 @@ Return as JSON: {{"questions": [{{"question": "...", "options": ["a", "b"] | nul
 """
 
 APPROACHES_PROMPT = """\
-## Decisions Made So Far
+## IdeaMemory — Canonical Decisions
 
-The following decisions have been confirmed by the user during this brainstorm \
-session. These are FINAL — do not contradict, reinterpret, or question them. \
-All proposed approaches must be consistent with these decisions.
+{idea_memory}
 
-{transcript}
-
-Before proposing approaches, list each decision the user has made. \
-All approaches must be consistent with every listed decision.
+All approaches must be consistent with IdeaMemory.
 
 Propose 2-3 distinct implementation approaches. Each should have a clear name, \
 description, and honest tradeoffs section.
@@ -86,16 +76,11 @@ DESIGN_SECTION_PROMPT = """\
 ## Selected approach
 {selected_approach}
 
-## Decisions Made So Far
+## IdeaMemory — Canonical Decisions
 
-The following decisions have been confirmed by the user during this brainstorm \
-session. These are FINAL — do not contradict, reinterpret, or question them. \
-This section must reflect these decisions accurately.
+{idea_memory}
 
-{transcript}
-
-Before writing this section, list each decision the user has made. \
-The section content must reflect these decisions exactly.
+This section must reflect IdeaMemory decisions exactly.
 
 ## Previously approved sections
 {approved_sections}
@@ -108,15 +93,11 @@ SYNTHESIZE_PROMPT = """\
 ## Selected approach
 {selected_approach}
 
-## Decisions Made So Far
+## IdeaMemory — Canonical Decisions
 
-The following decisions have been confirmed by the user during this brainstorm \
-session. These are FINAL — do not contradict, reinterpret, or question them. \
-The brief must incorporate every decision.
+{idea_memory}
 
-{transcript}
-
-Before synthesizing, list each decision the user has made.
+The brief must incorporate every IdeaMemory entry.
 
 ## Approved design sections
 {sections}

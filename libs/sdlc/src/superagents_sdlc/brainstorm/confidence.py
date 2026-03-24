@@ -74,34 +74,6 @@ If no entry addresses this section, write "No decision made yet."
 """
 
 
-def _format_transcript_for_assessment(transcript: list[dict]) -> str:
-    """Convert raw transcript entries into structured decision blocks for LLM prompts.
-
-    Each entry is labeled as a settled decision rather than an open question,
-    and only the selected answer is shown (options are excluded).
-
-    Args:
-        transcript: List of dicts with keys ``question``, ``answer``,
-            ``options``, and ``targets_section``.
-
-    Returns:
-        Formatted string with one ``### Decision N`` block per entry,
-        or a placeholder when the transcript is empty.
-    """
-    if not transcript:
-        return "No questions have been asked yet."
-
-    blocks = []
-    for i, entry in enumerate(transcript, start=1):
-        block = (
-            f"### Decision {i}\n"
-            f"**Question:** {entry['question']}\n"
-            f"**DECIDED:** {entry['answer']}"
-        )
-        blocks.append(block)
-    return "\n\n".join(blocks)
-
-
 def compute_confidence(sections: dict, deferred: list[str]) -> int:
     """Compute confidence score from section readiness ratings.
 
