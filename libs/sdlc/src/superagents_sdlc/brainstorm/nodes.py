@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from langgraph.types import interrupt
 
 from superagents_sdlc.brainstorm.confidence import _format_transcript_for_assessment
+from superagents_sdlc.brainstorm.idea_memory import IdeaMemory
 from superagents_sdlc.brainstorm.prompts import (
     APPROACHES_PROMPT,
     BRAINSTORM_SYSTEM,
@@ -166,9 +167,25 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
                 "answer": resolved,
                 "targets_section": question.get("targets_section", ""),
             })
+
+        # Update IdeaMemory with decisions
+        memory = IdeaMemory.from_state(
+            state["idea"],
+            list(state.get("idea_memory", [])),
+            dict(state.get("idea_memory_counts", {"decision": 0, "rejection": 0})),
+        )
+        for entry in updated[len(state["transcript"]):]:  # only new entries
+            section = entry.get("targets_section", "")
+            title = SECTION_TITLES.get(
+                section, section.replace("_", " ").title(),
+            )
+            memory.add_decision(title=title, text=entry["answer"])
+
         return {
             "transcript": updated,
             "round_number": state.get("round_number", 0) + 1,
+            "idea_memory": memory.to_state(),
+            "idea_memory_counts": memory.counts,
         }
 
     return generate_question

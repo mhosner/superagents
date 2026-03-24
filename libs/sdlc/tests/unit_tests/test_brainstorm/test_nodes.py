@@ -581,3 +581,67 @@ def test_node_prompts_contain_echo_instruction():
         assert "list each decision" in template, (
             f"{name} missing 'list each decision' echo instruction"
         )
+
+
+# -- IdeaMemory capture tests --
+
+
+from superagents_sdlc.brainstorm.idea_memory import IdeaMemory
+
+
+async def test_question_answer_adds_to_idea_memory():
+    """Answering a question adds a decision entry to idea_memory."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Storage?", "options": ["JSON", "SQLite"],
+                 "targets_section": "technical_constraints"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=["JSON"]):
+        result = await node(_make_state())
+
+    assert len(result["idea_memory"]) == 1
+    assert result["idea_memory"][0]["id"] == "D1"
+    assert result["idea_memory"][0]["text"] == "JSON"
+
+
+async def test_multiple_answers_sequential_ids():
+    """Multiple answers produce D1, D2, D3."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Q1?", "options": None, "targets_section": "requirements"},
+                {"question": "Q2?", "options": None, "targets_section": "scope_boundaries"},
+                {"question": "Q3?", "options": None, "targets_section": "acceptance_criteria"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=["A1", "A2", "A3"]):
+        result = await node(_make_state())
+
+    ids = [e["id"] for e in result["idea_memory"]]
+    assert ids == ["D1", "D2", "D3"]
+
+
+async def test_decision_title_uses_section_titles():
+    """Decision title comes from SECTION_TITLES mapping."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Tech?", "options": None,
+                 "targets_section": "technical_constraints"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=["PostgreSQL"]):
+        result = await node(_make_state())
+
+    assert result["idea_memory"][0]["title"] == "Technical Constraints & Dependencies"
