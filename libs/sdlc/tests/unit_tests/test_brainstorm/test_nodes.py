@@ -536,3 +536,23 @@ async def test_synthesize_node_passes_cached_prefix():
     assert cached_prefix is not None
     assert "Build search" in cached_prefix
     assert "Build search" not in prompt
+
+
+def test_node_prompts_contain_echo_instruction():
+    """All transcript-consuming prompts require the LLM to list decisions."""
+    from superagents_sdlc.brainstorm.prompts import (
+        APPROACHES_PROMPT,
+        DESIGN_SECTION_PROMPT,
+        QUESTION_PROMPT,
+        SYNTHESIZE_PROMPT,
+    )
+
+    for name, template in [
+        ("QUESTION_PROMPT", QUESTION_PROMPT),
+        ("APPROACHES_PROMPT", APPROACHES_PROMPT),
+        ("DESIGN_SECTION_PROMPT", DESIGN_SECTION_PROMPT),
+        ("SYNTHESIZE_PROMPT", SYNTHESIZE_PROMPT),
+    ]:
+        assert "list each decision" in template, (
+            f"{name} missing 'list each decision' echo instruction"
+        )

@@ -47,6 +47,9 @@ Do not re-ask about decided topics.
 
 {transcript}
 
+Before generating questions, list each decision the user has made. \
+Do not generate questions that contradict or re-ask these decisions.
+
 ## Current section readiness
 {section_readiness}
 
@@ -71,6 +74,9 @@ All proposed approaches must be consistent with these decisions.
 
 {transcript}
 
+Before proposing approaches, list each decision the user has made. \
+All approaches must be consistent with every listed decision.
+
 Propose 2-3 distinct implementation approaches. Each should have a clear name, \
 description, and honest tradeoffs section.
 Return as JSON array: [{{"name": "...", "description": "...", "tradeoffs": "..."}}]
@@ -88,6 +94,9 @@ This section must reflect these decisions accurately.
 
 {transcript}
 
+Before writing this section, list each decision the user has made. \
+The section content must reflect these decisions exactly.
+
 ## Previously approved sections
 {approved_sections}
 
@@ -98,6 +107,16 @@ Return the section content as markdown.
 SYNTHESIZE_PROMPT = """\
 ## Selected approach
 {selected_approach}
+
+## Decisions Made So Far
+
+The following decisions have been confirmed by the user during this brainstorm \
+session. These are FINAL — do not contradict, reinterpret, or question them. \
+The brief must incorporate every decision.
+
+{transcript}
+
+Before synthesizing, list each decision the user has made.
 
 ## Approved design sections
 {sections}
