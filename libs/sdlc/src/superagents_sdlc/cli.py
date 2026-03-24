@@ -272,8 +272,10 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
                 print(f"\nQuestion {i} of {len(questions)}{target_label}:")  # noqa: T201
                 print(f"  {q['question']}")  # noqa: T201
                 if q.get("options"):
+                    from superagents_sdlc.brainstorm.nodes import _clean_option  # noqa: PLC0415
+
                     for j, opt in enumerate(q["options"], 1):
-                        print(f"    {j}. {opt}")  # noqa: T201
+                        print(f"    {j}. {_clean_option(opt)}")  # noqa: T201
                 print("  (type 'q' to quit)")  # noqa: T201
             response = await _async_input("> ")
             if response.strip().lower() in ("q", "quit"):
@@ -286,8 +288,10 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
         if not quiet:
             print(f"\n{payload['question']}")  # noqa: T201
             if payload.get("options"):
+                from superagents_sdlc.brainstorm.nodes import _clean_option  # noqa: PLC0415
+
                 for i, opt in enumerate(payload["options"], 1):
-                    print(f"  {i}. {opt}")  # noqa: T201
+                    print(f"  {i}. {_clean_option(opt)}")  # noqa: T201
             print("  (type 'q' to quit)")  # noqa: T201
         response = await _async_input("> ")
         if response.strip().lower() in ("q", "quit"):

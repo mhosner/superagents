@@ -1088,3 +1088,67 @@ async def test_orchestrator_no_fast_llm_uses_single(exporter, tmp_path):
 
     # All calls should be on the single llm
     assert len(single_llm.calls) >= 9
+
+
+# -- unroutable findings tests --
+
+
+async def test_plan_from_spec_collects_unroutable_architect_findings(exporter, tmp_path):
+    """Architect findings in plan-from-spec are unroutable (architect not active)."""
+    # Default _make_pipeline_llm routes findings to architect — perfect for this test
+    orchestrator, _ = _make_orchestrator()
+
+    plan_path = tmp_path / "input_plan.md"
+    plan_path.write_text("## Tasks\n1. Create model")
+    spec_path = tmp_path / "input_spec.md"
+    spec_path.write_text("# Tech Spec\nREST API")
+    stories_path = tmp_path / "input_stories.md"
+    stories_path.write_text("As a PM, I want dark mode")
+
+    result = await orchestrator.run_plan_from_spec(
+        implementation_plan_path=str(plan_path),
+        tech_spec_path=str(spec_path),
+        user_stories_path=str(stories_path),
+        artifact_dir=tmp_path / "output",
+    )
+
+    # Architect is not active in plan-from-spec, so architect findings are unroutable
+    assert result.unroutable_findings is not None
+    assert "architect" in result.unroutable_findings
+    assert len(result.unroutable_findings["architect"]) >= 1
+
+
+async def test_plan_from_spec_fires_unroutable_callback(exporter, tmp_path):
+    """on_unroutable_findings callback is called with architect findings."""
+    orchestrator, _ = _make_orchestrator()
+    unroutable_calls: list[dict] = []
+
+    plan_path = tmp_path / "input_plan.md"
+    plan_path.write_text("## Tasks\n1. Create model")
+    spec_path = tmp_path / "input_spec.md"
+    spec_path.write_text("# Tech Spec\nREST API")
+    stories_path = tmp_path / "input_stories.md"
+    stories_path.write_text("As a PM, I want dark mode")
+
+    def on_unroutable(findings):
+        unroutable_calls.append(findings)
+
+    result = await orchestrator.run_plan_from_spec(
+        implementation_plan_path=str(plan_path),
+        tech_spec_path=str(spec_path),
+        user_stories_path=str(stories_path),
+        artifact_dir=tmp_path / "output",
+        on_unroutable_findings=on_unroutable,
+    )
+
+    assert len(unroutable_calls) == 1
+    assert "architect" in unroutable_calls[0]
+
+
+async def test_idea_to_code_no_unroutable_when_all_active(exporter, tmp_path):
+    """idea-to-code has all personas active, so no findings are unroutable."""
+    orchestrator, _ = _make_orchestrator()
+
+    result = await orchestrator.run_idea_to_code("Add dark mode", artifact_dir=tmp_path)
+
+    assert result.unroutable_findings is None

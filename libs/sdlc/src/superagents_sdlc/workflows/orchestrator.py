@@ -176,6 +176,7 @@ class PipelineOrchestrator:
         on_qa_complete: Callable[[str, list[Artifact]], None] | None = None,
         on_findings_routed: Callable[[dict, list[str]], None] | None = None,
         on_retry_start: Callable[[str, dict], None] | None = None,
+        on_unroutable_findings: Callable[[dict[str, list[dict]]], None] | None = None,
     ) -> PipelineResult:
         """Run full pipeline: PM -> Architect -> Developer -> QA.
 
@@ -285,6 +286,7 @@ class PipelineOrchestrator:
                 on_qa_complete=on_qa_complete,
                 on_findings_routed=on_findings_routed,
                 on_retry_start=on_retry_start,
+                on_unroutable_findings=on_unroutable_findings,
             )
 
         return result
@@ -301,6 +303,7 @@ class PipelineOrchestrator:
         on_qa_complete: Callable[[str, list[Artifact]], None] | None = None,
         on_findings_routed: Callable[[dict, list[str]], None] | None = None,
         on_retry_start: Callable[[str, dict], None] | None = None,
+        on_unroutable_findings: Callable[[dict[str, list[dict]]], None] | None = None,
     ) -> PipelineResult:
         """Run pipeline from PRD: Architect -> Developer -> QA.
 
@@ -397,6 +400,7 @@ class PipelineOrchestrator:
                 on_qa_complete=on_qa_complete,
                 on_findings_routed=on_findings_routed,
                 on_retry_start=on_retry_start,
+                on_unroutable_findings=on_unroutable_findings,
             )
 
         return result
@@ -414,6 +418,7 @@ class PipelineOrchestrator:
         on_qa_complete: Callable[[str, list[Artifact]], None] | None = None,
         on_findings_routed: Callable[[dict, list[str]], None] | None = None,
         on_retry_start: Callable[[str, dict], None] | None = None,
+        on_unroutable_findings: Callable[[dict[str, list[dict]]], None] | None = None,
     ) -> PipelineResult:
         """Run pipeline from spec: Developer -> QA.
 
@@ -516,6 +521,7 @@ class PipelineOrchestrator:
                 on_qa_complete=on_qa_complete,
                 on_findings_routed=on_findings_routed,
                 on_retry_start=on_retry_start,
+                on_unroutable_findings=on_unroutable_findings,
             )
 
         return result
@@ -527,6 +533,8 @@ class PipelineOrchestrator:
         result: PipelineResult,
         artifact_dir: Path,
         on_phase_complete: Callable[[str, list[Artifact]], None] | None = None,
+        on_retry_start: Callable[[str, dict], None] | None = None,
+        on_unroutable_findings: Callable[[dict[str, list[dict]]], None] | None = None,
     ) -> PipelineResult:
         """Run a human-directed revision pass.
 
@@ -590,6 +598,8 @@ class PipelineOrchestrator:
             result=result,
             artifact_dir=artifact_dir,
             on_phase_complete=on_phase_complete,
+            on_retry_start=on_retry_start,
+            on_unroutable_findings=on_unroutable_findings,
         )
 
     # Canonical persona order for cascade logic.
@@ -604,6 +614,7 @@ class PipelineOrchestrator:
         on_qa_complete: Callable[[str, list[Artifact]], None] | None = None,
         on_findings_routed: Callable[[dict, list[str]], None] | None = None,
         on_retry_start: Callable[[str, dict], None] | None = None,
+        on_unroutable_findings: Callable[[dict[str, list[dict]]], None] | None = None,
     ) -> PipelineResult:
         """Re-invoke personas tagged in the routing manifest, then re-run QA.
 
@@ -654,6 +665,17 @@ class PipelineOrchestrator:
             active_personas.add("architect")
         if result.developer:
             active_personas.add("developer")
+
+        # Collect unroutable findings (routed to inactive personas)
+        unroutable = {
+            persona: routing[persona]
+            for persona in self._PERSONA_ORDER
+            if routing.get(persona) and persona not in active_personas
+        }
+        if unroutable:
+            result.unroutable_findings = unroutable
+            if on_unroutable_findings:
+                on_unroutable_findings(unroutable)
 
         # Cascade: if any persona is tagged, all downstream also re-run
         # but only among personas that were active in the initial pipeline

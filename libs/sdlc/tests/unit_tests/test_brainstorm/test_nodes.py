@@ -10,6 +10,8 @@ import pytest
 from langgraph.errors import GraphInterrupt
 
 from superagents_sdlc.brainstorm.nodes import (
+    _clean_option,
+    _resolve_answer,
     make_explore_context_node,
     make_generate_design_section_node,
     make_generate_question_node,
@@ -315,3 +317,79 @@ async def test_synthesize_brief_annotates_deferred_sections():
     prompt = llm.calls[0][0]
     assert "downstream resolution" in prompt
     assert "Technical Constraints" in prompt
+
+
+# -- Answer resolution tests --
+
+
+def test_resolve_answer_by_number():
+    assert _resolve_answer("2", ["Apple", "Banana", "Cherry"]) == "Banana"
+
+
+def test_resolve_answer_by_letter():
+    assert _resolve_answer("b", ["Apple", "Banana", "Cherry"]) == "Banana"
+
+
+def test_resolve_answer_open_ended():
+    assert _resolve_answer("custom text", None) == "custom text"
+
+
+def test_resolve_answer_unrecognized_returns_raw():
+    assert _resolve_answer("xyz", ["Apple", "Banana"]) == "xyz"
+
+
+# -- Option cleaning tests --
+
+
+def test_clean_option_strips_letter_prefix():
+    assert _clean_option("a) Shared tables") == "Shared tables"
+
+
+def test_clean_option_no_prefix_unchanged():
+    assert _clean_option("Shared tables") == "Shared tables"
+
+
+def test_clean_option_strips_letter_dot_prefix():
+    assert _clean_option("a. Shared tables") == "Shared tables"
+
+
+# -- Transcript resolution wiring tests --
+
+
+async def test_transcript_stores_resolved_text():
+    """When user answers '2', transcript stores the full option text."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Storage?", "options": ["JSON", "SQLite"], "targets_section": "technical_constraints"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=["2"]):
+        result = await node(_make_state())
+
+    assert result["transcript"][0]["answer"] == "SQLite"
+    assert result["transcript"][0]["options"] == ["JSON", "SQLite"]
+
+
+async def test_batch_questions_all_resolved():
+    """Multiple questions with mixed answer types all resolve correctly."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Storage?", "options": ["JSON", "SQLite"], "targets_section": "technical_constraints"},
+                {"question": "Deploy?", "options": ["Docker", "Lambda"], "targets_section": "technical_constraints"},
+                {"question": "Custom notes?", "options": None, "targets_section": "requirements"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=["1", "b", "free text"]):
+        result = await node(_make_state())
+
+    assert result["transcript"][0]["answer"] == "JSON"
+    assert result["transcript"][1]["answer"] == "Lambda"
+    assert result["transcript"][2]["answer"] == "free text"

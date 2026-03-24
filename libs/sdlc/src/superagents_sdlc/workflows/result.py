@@ -33,3 +33,4 @@ class PipelineResult:
     certification: str = "skipped"
     retry_attempted: bool = False
     pre_retry_certification: str = ""
+    unroutable_findings: dict[str, list[dict]] | None = None

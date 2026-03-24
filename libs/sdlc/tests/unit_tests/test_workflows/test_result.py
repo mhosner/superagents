@@ -31,3 +31,17 @@ def test_pipeline_result_with_artifacts():
     assert len(result.pm) == 1
     assert result.pm[0].artifact_type == "prd"
     assert result.certification == "NEEDS WORK"
+
+
+def test_pipeline_result_unroutable_findings_defaults_to_none():
+    result = PipelineResult()
+    assert result.unroutable_findings is None
+
+
+def test_pipeline_result_carries_unroutable_findings():
+    findings = {
+        "architect": [{"id": "RF-1", "summary": "Missing interface"}],
+    }
+    result = PipelineResult(unroutable_findings=findings)
+    assert result.unroutable_findings == findings
+    assert len(result.unroutable_findings["architect"]) == 1

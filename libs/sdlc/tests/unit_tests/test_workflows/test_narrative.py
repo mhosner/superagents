@@ -286,3 +286,19 @@ def test_full_narrative_flow(tmp_path: Path):
 
     assert header_pos < pass1_pos < pm_pos < qa_pos < pass3_pos
     assert pass3_pos < feedback_pos < routing_pos < final_pos
+
+
+def test_narrative_records_unroutable_findings(tmp_path: Path):
+    writer = NarrativeWriter(tmp_path, "test")
+    writer.record_unroutable_findings({
+        "architect": [
+            {"id": "RF-1", "summary": "Missing interface definition"},
+            {"id": "RF-2", "summary": "Spec contradiction on timeouts"},
+        ],
+    })
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "Unroutable Findings" in content
+    assert "Architect" in content
+    assert "2 findings" in content
+    assert "Missing interface definition" in content
+    assert "Spec contradiction on timeouts" in content

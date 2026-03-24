@@ -225,6 +225,32 @@ class NarrativeWriter:
         with self._path.open("a") as f:
             f.writelines(lines)
 
+    def record_unroutable_findings(
+        self, unroutable: dict[str, list[dict]],
+    ) -> None:
+        """Record findings routed to inactive personas.
+
+        Args:
+            unroutable: Map of persona name to list of finding dicts.
+        """
+        display = {
+            "product_manager": "Product Manager",
+            "architect": "Architect",
+            "developer": "Developer",
+        }
+        lines = ["\n**Unroutable Findings**\n"]
+        for persona, findings in unroutable.items():
+            label = display.get(persona, persona)
+            lines.append(
+                f"- **{label}**: {len(findings)} findings "
+                f"cannot be addressed (persona not active in this pipeline mode)\n"
+            )
+            for finding in findings:
+                summary = finding.get("summary", "No summary")
+                lines.append(f"  - {summary}\n")
+        with self._path.open("a") as f:
+            f.writelines(lines)
+
     def record_final_result(self, certification: str, total_passes: int) -> None:
         """Write the final result summary.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 from langgraph.types import interrupt
@@ -49,7 +50,48 @@ def _deferred_title(section: str) -> str:
         Human-readable title.
     """
     return _SECTION_TITLES.get(section, section.replace("_", " ").title())
-MAX_BRIEF_REVISIONS = 2
+def _clean_option(text: str) -> str:
+    """Strip leading letter prefix like ``a) `` or ``a. `` from an option.
+
+    Args:
+        text: Raw option string, possibly with LLM-generated prefix.
+
+    Returns:
+        Option text without letter prefix.
+    """
+    return re.sub(r"^[a-z][).]\s*", "", text)
+
+
+def _resolve_answer(response: str, options: list[str] | None) -> str:
+    """Resolve a letter/number selection to full option text.
+
+    Args:
+        response: Raw user input (e.g., "2", "b", or free text).
+        options: Available options, or None for open-ended questions.
+
+    Returns:
+        Full option text if resolvable, otherwise the raw response.
+    """
+    if options is None:
+        return response
+
+    raw = response.strip().lower()
+
+    # Try as 1-indexed number
+    try:
+        idx = int(raw) - 1
+        if 0 <= idx < len(options):
+            return options[idx]
+    except ValueError:
+        pass
+
+    # Try as letter (a=0, b=1, ...)
+    if len(raw) == 1 and raw.isalpha():
+        idx = ord(raw) - ord("a")
+        if 0 <= idx < len(options):
+            return options[idx]
+
+    return response
 
 
 def make_explore_context_node() -> Callable[..., Any]:
@@ -119,9 +161,13 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
 
         updated = list(state["transcript"])
         for question, answer in zip(questions, answers, strict=False):
+            raw_options = question.get("options")
+            cleaned = [_clean_option(o) for o in raw_options] if raw_options else None
+            resolved = _resolve_answer(answer, cleaned)
             updated.append({
                 "question": question.get("question", "?"),
-                "answer": answer,
+                "options": cleaned,
+                "answer": resolved,
                 "targets_section": question.get("targets_section", ""),
             })
         return {
