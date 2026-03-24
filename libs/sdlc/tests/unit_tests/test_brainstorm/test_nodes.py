@@ -538,6 +538,29 @@ async def test_synthesize_node_passes_cached_prefix():
     assert "Build search" not in prompt
 
 
+async def test_synthesize_node_includes_transcript():
+    """synthesize_brief passes formatted transcript to the prompt."""
+    llm = _SpyLLMClient(response="# Design Brief\nFull content")
+    node = make_synthesize_brief_node(llm)
+    state = _make_state(
+        idea="Build search",
+        product_context="Enterprise SaaS",
+        codebase_context="Python backend",
+        status="synthesizing",
+        design_sections=[{"title": "T", "content": "C", "approved": True}],
+        selected_approach="Simple",
+        transcript=[
+            {"question": "Storage?", "answer": "PostgreSQL", "options": None, "targets_section": "technical_constraints"},
+        ],
+    )
+
+    with patch(_INTERRUPT_PATH, return_value="approve"):
+        await node(state)
+
+    prompt, _system, _cached_prefix = llm.calls[0]
+    assert "**DECIDED:** PostgreSQL" in prompt
+
+
 def test_node_prompts_contain_echo_instruction():
     """All transcript-consuming prompts require the LLM to list decisions."""
     from superagents_sdlc.brainstorm.prompts import (

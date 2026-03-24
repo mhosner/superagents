@@ -320,6 +320,7 @@ def make_synthesize_brief_node(llm: LLMClient) -> Callable[..., Any]:
         )
         prompt = SYNTHESIZE_PROMPT.format(
             selected_approach=state["selected_approach"],
+            transcript=_format_transcript_for_assessment(state["transcript"]),
             sections=sections_text,
         )
         brief = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)
