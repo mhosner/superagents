@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 
-from superagents_sdlc.cli import _build_parser
+from superagents_sdlc.cli import _build_parser, _extract_section_content
 
 
 # Derive cwd from test file location (portable, not hardcoded)
@@ -128,3 +129,19 @@ def test_brainstorm_no_output_dir():
 
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "Design Brief" in result.stdout
+
+
+def test_extract_section_content_from_json():
+    """JSON string with a ``content`` field returns only the content value."""
+    raw = json.dumps({
+        "section": "Problem Statement & Goals",
+        "status": "draft",
+        "content": "## Problem Statement\nThe app needs dark mode.",
+    })
+    assert _extract_section_content(raw) == "## Problem Statement\nThe app needs dark mode."
+
+
+def test_extract_section_content_fallback_on_invalid_json():
+    """Plain markdown string (not JSON) is returned as-is."""
+    raw = "## Problem Statement\nThe app needs dark mode."
+    assert _extract_section_content(raw) == raw

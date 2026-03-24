@@ -240,6 +240,25 @@ def _brainstorm_stub_responses() -> dict[str, str]:
     }
 
 
+def _extract_section_content(raw: str) -> str:
+    """Extract content from a JSON-wrapped design section response.
+
+    If the response is a JSON object with a ``content`` field, return just
+    the content. Otherwise return the raw string unchanged.
+
+    Args:
+        raw: Raw LLM response, possibly JSON-wrapped.
+
+    Returns:
+        Extracted markdown content or the original string.
+    """
+    try:
+        parsed = json.loads(raw)
+        return parsed.get("content", raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
+
+
 async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) -> str:
     """Handle a brainstorm interrupt by prompting the user.
 
@@ -346,7 +365,7 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
     if interrupt_type == "design_section":
         if not quiet:
             print(f"\n--- {payload['title']} ---")  # noqa: T201
-            print(payload["content"])  # noqa: T201
+            print(_extract_section_content(payload["content"]))  # noqa: T201
             print("\n  approve (a) / edit (paste text) / quit (q)")  # noqa: T201
         response = await _async_input("> ")
         if response.strip().lower() in ("q", "quit"):
