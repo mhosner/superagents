@@ -45,8 +45,20 @@ Your readiness assessment must be consistent with these decisions.
 
 {transcript}
 
-Assess the brainstorm readiness. For each section below, rate the readiness \
-of each brief section and provide evidence.
+Step 1: Write out each decision verbatim (before your JSON).
+For each decision above, write: \
+"Decision N: The user decided: [copy the DECIDED text exactly]"
+
+Step 2: Produce your JSON assessment (consistent with Step 1).
+Rate each section's readiness. Your ratings MUST be consistent with \
+the decisions you echoed in Step 1.
+
+CRITICAL RULES:
+- Do NOT infer decisions the user did not make
+- Do NOT extend a decision beyond its literal text
+- Do NOT combine or synthesize multiple decisions into a new conclusion
+- If a decision directly answers a gap, that gap is closed — do not list it
+- Only reference decisions that appear in the "Decisions Made So Far" section
 
 Readiness ratings:
 - "high": Could write this section now with confidence
@@ -63,7 +75,10 @@ Sections to rate the readiness of:
 
 {deferred_note}
 
-Return ONLY valid JSON:
+Return ONLY valid JSON (after your Step 1 echo):
+For the "evidence" field: quote ONLY from the Decisions Made block above. \
+Do not synthesize, interpret, or extend. If no decision addresses this \
+section, write "No decision made yet."
 {{"sections": {{"problem_statement": {{"readiness": "high", "evidence": "..."}}, ...}}, \
 "gaps": [{{"section": "...", "description": "..."}}], \
 "recommendation": "continue" | "ready"}}

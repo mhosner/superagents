@@ -113,7 +113,7 @@ def _low_assessment():
 
 
 async def test_estimate_all_high_scores_above_threshold():
-    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
     node = make_estimate_confidence_node(llm)
     result = await node(_make_state())
 
@@ -123,7 +123,7 @@ async def test_estimate_all_high_scores_above_threshold():
 
 
 async def test_estimate_mixed_scores_below_threshold():
-    llm = StubLLMClient(responses={"rate the readiness": _low_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
     def _raise_interrupt(value):
@@ -137,7 +137,7 @@ async def test_estimate_mixed_scores_below_threshold():
 
 
 async def test_estimate_mixed_on_resume_continue():
-    llm = StubLLMClient(responses={"rate the readiness": _low_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
     with patch(_INTERRUPT_PATH, return_value="continue"):
@@ -149,7 +149,7 @@ async def test_estimate_mixed_on_resume_continue():
 
 
 async def test_estimate_with_deferred_sections():
-    llm = StubLLMClient(responses={"rate the readiness": _low_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
     with patch(_INTERRUPT_PATH, return_value="defer technical_constraints,acceptance_criteria"):
@@ -162,7 +162,7 @@ async def test_estimate_with_deferred_sections():
 
 
 async def test_estimate_max_rounds_forces_proceed():
-    llm = StubLLMClient(responses={"rate the readiness": _low_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
     result = await node(_make_state(round_number=10))
@@ -171,7 +171,7 @@ async def test_estimate_max_rounds_forces_proceed():
 
 
 async def test_estimate_override_forces_proceed():
-    llm = StubLLMClient(responses={"rate the readiness": _low_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
     with patch(_INTERRUPT_PATH, return_value="override"):
@@ -261,7 +261,7 @@ def test_format_transcript_multiple_entries():
 
 async def test_confidence_prompt_contains_decisions_framing():
     """Assessment prompt must frame transcript as settled decisions."""
-    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
     node = make_estimate_confidence_node(llm)
     await node(_make_state())
 
@@ -280,19 +280,21 @@ async def test_confidence_prompt_uses_formatted_transcript():
             "targets_section": "scope_boundaries",
         }
     ]
-    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
     node = make_estimate_confidence_node(llm)
     await node(_make_state(transcript=transcript))
 
     prompt = llm.calls[0][0]
     assert "**DECIDED:** Automatic sub-step" in prompt
     assert "/sfn-analyze slash command" not in prompt
-    assert "json" not in prompt.lower().split("return only valid json")[0]
+    # No raw JSON transcript data before the decisions block
+    before_decisions = prompt.lower().split("## decisions made so far")[0]
+    assert "json" not in before_decisions
 
 
 async def test_confidence_node_passes_cached_prefix():
     """The confidence node passes cached_prefix containing idea and context."""
-    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
     node = make_estimate_confidence_node(llm)
     state = _make_state(
         idea="Build search feature",
@@ -312,7 +314,7 @@ async def test_confidence_node_passes_cached_prefix():
 
 async def test_confidence_node_cached_prefix_excludes_transcript():
     """The transcript must be in the variable prompt, not cached_prefix."""
-    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
     node = make_estimate_confidence_node(llm)
     state = _make_state(
         transcript=[{"question": "Who?", "answer": "Devs", "options": None, "targets_section": ""}],
@@ -321,3 +323,36 @@ async def test_confidence_node_cached_prefix_excludes_transcript():
 
     prompt = llm.calls[0][0]
     assert "**DECIDED:** Devs" in prompt
+
+
+async def test_confidence_prompt_requires_echo_step():
+    """Prompt must instruct LLM to echo decisions before JSON."""
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
+    node = make_estimate_confidence_node(llm)
+    await node(_make_state())
+
+    prompt = llm.calls[0][0]
+    assert "Write out each decision verbatim" in prompt
+    assert "before your JSON" in prompt
+
+
+async def test_confidence_prompt_contains_critical_rules():
+    """Prompt must contain all three Do NOT rules."""
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
+    node = make_estimate_confidence_node(llm)
+    await node(_make_state())
+
+    prompt = llm.calls[0][0]
+    assert "Do NOT infer" in prompt
+    assert "Do NOT extend" in prompt
+    assert "Do NOT combine" in prompt
+
+
+async def test_confidence_prompt_evidence_quote_only():
+    """Evidence field must be constrained to quote-only."""
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
+    node = make_estimate_confidence_node(llm)
+    await node(_make_state())
+
+    prompt = llm.calls[0][0]
+    assert "quote ONLY from the Decisions Made" in prompt
