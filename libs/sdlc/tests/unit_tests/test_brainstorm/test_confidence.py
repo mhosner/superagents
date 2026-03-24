@@ -11,7 +11,6 @@ from langgraph.errors import GraphInterrupt
 from superagents_sdlc.brainstorm.confidence import (
     READINESS_SCORES,
     SECTIONS,
-    _format_transcript_for_assessment,
     compute_confidence,
     make_estimate_confidence_node,
 )
@@ -182,116 +181,28 @@ async def test_estimate_override_forces_proceed():
     assert result["status"] == "proposing"
 
 
-# -- _format_transcript_for_assessment tests --
+# -- IdeaMemory in confidence prompt --
 
 
-def test_format_transcript_empty():
-    """Empty transcript returns a placeholder message."""
-    result = _format_transcript_for_assessment([])
-    assert result == "No questions have been asked yet."
-
-
-def test_format_transcript_single_entry():
-    """Single Q&A formats as Decision 1 with DECIDED label."""
-    transcript = [
-        {
-            "question": "Who is the target user?",
-            "answer": "Mobile developers",
-            "options": None,
-            "targets_section": "users_and_personas",
-        }
-    ]
-    result = _format_transcript_for_assessment(transcript)
-    assert "### Decision 1" in result
-    assert "**Question:** Who is the target user?" in result
-    assert "**DECIDED:** Mobile developers" in result
-
-
-def test_format_transcript_excludes_options():
-    """Options list must not appear in formatted output."""
-    transcript = [
-        {
-            "question": "Which database?",
-            "answer": "PostgreSQL",
-            "options": ["MySQL", "PostgreSQL", "SQLite"],
-            "targets_section": "technical_constraints",
-        }
-    ]
-    result = _format_transcript_for_assessment(transcript)
-    assert "PostgreSQL" in result
-    assert "MySQL" not in result
-    assert "SQLite" not in result
-    assert "Option" not in result
-
-
-def test_format_transcript_multiple_entries():
-    """Three Q&As numbered Decision 1/2/3 with correct answers."""
-    transcript = [
-        {
-            "question": "What problem?",
-            "answer": "Slow deployments",
-            "options": ["Slow deployments", "Bad UX"],
-            "targets_section": "problem_statement",
-        },
-        {
-            "question": "Who uses it?",
-            "answer": "DevOps engineers",
-            "options": None,
-            "targets_section": "users_and_personas",
-        },
-        {
-            "question": "What stack?",
-            "answer": "Python + Docker",
-            "options": ["Python + Docker", "Go + K8s"],
-            "targets_section": "technical_constraints",
-        },
-    ]
-    result = _format_transcript_for_assessment(transcript)
-    assert "### Decision 1" in result
-    assert "### Decision 2" in result
-    assert "### Decision 3" in result
-    assert "**DECIDED:** Slow deployments" in result
-    assert "**DECIDED:** DevOps engineers" in result
-    assert "**DECIDED:** Python + Docker" in result
-    # Excluded options should not appear
-    assert "Bad UX" not in result
-    assert "Go + K8s" not in result
-
-
-# -- Wiring tests: formatted transcript in confidence prompt --
-
-
-async def test_confidence_prompt_contains_decisions_framing():
-    """Assessment prompt must frame transcript as settled decisions."""
+async def test_confidence_prompt_contains_idea_memory():
+    """Prompt must contain IdeaMemory text, not formatted transcript."""
     llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
     node = make_estimate_confidence_node(llm)
-    await node(_make_state())
+    state = _make_state(
+        idea_memory=[
+            {"id": "D1", "title": "Storage", "type": "decision", "text": "Use PostgreSQL"},
+        ],
+        idea_memory_counts={"decision": 1, "rejection": 0},
+        idea="Build search feature",
+    )
+    await node(state)
 
     prompt = llm.calls[0][0]
-    assert "Decisions Made So Far" in prompt
-    assert "FINAL" in prompt
-
-
-async def test_confidence_prompt_uses_formatted_transcript():
-    """Assessment prompt uses formatted transcript, not raw JSON."""
-    transcript = [
-        {
-            "question": "Trigger method?",
-            "answer": "Automatic sub-step",
-            "options": ["Automatic sub-step", "/sfn-analyze slash command"],
-            "targets_section": "scope_boundaries",
-        }
-    ]
-    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
-    node = make_estimate_confidence_node(llm)
-    await node(_make_state(transcript=transcript))
-
-    prompt = llm.calls[0][0]
-    assert "**DECIDED:** Automatic sub-step" in prompt
-    assert "/sfn-analyze slash command" not in prompt
-    # No raw JSON transcript data before the decisions block
-    before_decisions = prompt.lower().split("## decisions made so far")[0]
-    assert "json" not in before_decisions
+    assert "IdeaMemory" in prompt
+    assert "Use PostgreSQL" in prompt
+    assert "D1: Storage [decision]" in prompt
+    # Transcript formatter output should NOT be in prompt
+    assert "**DECIDED:**" not in prompt
 
 
 async def test_confidence_node_passes_cached_prefix():
@@ -312,49 +223,3 @@ async def test_confidence_node_passes_cached_prefix():
     assert "Build search feature" not in prompt
     assert "Enterprise SaaS" not in prompt
     assert "Python FastAPI backend" not in prompt
-
-
-async def test_confidence_node_cached_prefix_excludes_transcript():
-    """The transcript must be in the variable prompt, not cached_prefix."""
-    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
-    node = make_estimate_confidence_node(llm)
-    state = _make_state(
-        transcript=[{"question": "Who?", "answer": "Devs", "options": None, "targets_section": ""}],
-    )
-    await node(state)
-
-    prompt = llm.calls[0][0]
-    assert "**DECIDED:** Devs" in prompt
-
-
-async def test_confidence_prompt_requires_echo_step():
-    """Prompt must instruct LLM to echo decisions before JSON."""
-    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
-    node = make_estimate_confidence_node(llm)
-    await node(_make_state())
-
-    prompt = llm.calls[0][0]
-    assert "Write out each decision verbatim" in prompt
-    assert "before your JSON" in prompt
-
-
-async def test_confidence_prompt_contains_critical_rules():
-    """Prompt must contain all three Do NOT rules."""
-    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
-    node = make_estimate_confidence_node(llm)
-    await node(_make_state())
-
-    prompt = llm.calls[0][0]
-    assert "Do NOT infer" in prompt
-    assert "Do NOT extend" in prompt
-    assert "Do NOT combine" in prompt
-
-
-async def test_confidence_prompt_evidence_quote_only():
-    """Evidence field must be constrained to quote-only."""
-    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
-    node = make_estimate_confidence_node(llm)
-    await node(_make_state())
-
-    prompt = llm.calls[0][0]
-    assert "quote ONLY from the Decisions Made" in prompt

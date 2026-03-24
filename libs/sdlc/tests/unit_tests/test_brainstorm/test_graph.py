@@ -69,7 +69,7 @@ def _make_full_stub() -> StubLLMClient:
     """
     return StubLLMClient(responses={
         # Confidence assessment — must come before question prompts
-        "rate the readiness": _all_high_assessment(),
+        "Readiness ratings": _all_high_assessment(),
         # Questions (gap-targeting)
         "## Gaps to address": json.dumps({
             "questions": [
@@ -114,7 +114,7 @@ async def test_confidence_above_threshold_proceeds_to_approaches():
 async def test_confidence_below_threshold_shows_assessment():
     """Low confidence interrupts with confidence_assessment."""
     stub = StubLLMClient(responses={
-        "rate the readiness": _low_assessment(),
+        "Readiness ratings": _low_assessment(),
         "## Gaps to address": json.dumps({
             "questions": [{"question": "Q?", "options": None, "targets_section": "requirements"}],
         }),
@@ -130,7 +130,7 @@ async def test_confidence_below_threshold_shows_assessment():
 async def test_continue_loops_to_questions():
     """'continue' response loops to question generation."""
     stub = StubLLMClient(responses={
-        "rate the readiness": _low_assessment(),
+        "Readiness ratings": _low_assessment(),
         "## Gaps to address": json.dumps({
             "questions": [{"question": "Storage?", "options": ["JSON", "SQLite"], "targets_section": "technical_constraints"}],
         }),
@@ -172,7 +172,7 @@ async def test_full_flow_to_completion():
 async def test_override_forces_proceed():
     """'override' response bypasses threshold and proceeds to approaches."""
     stub = StubLLMClient(responses={
-        "rate the readiness": _low_assessment(),
+        "Readiness ratings": _low_assessment(),
         "Propose 2-3": json.dumps([
             {"name": "A", "description": "d", "tradeoffs": "t"},
         ]),
@@ -191,7 +191,7 @@ async def test_override_forces_proceed():
 async def test_state_snapshot_has_transcript():
     """State snapshot contains transcript after answering questions."""
     stub = StubLLMClient(responses={
-        "rate the readiness": _low_assessment(),
+        "Readiness ratings": _low_assessment(),
         "## Gaps to address": json.dumps({
             "questions": [{"question": "Q?", "options": None, "targets_section": "requirements"}],
         }),

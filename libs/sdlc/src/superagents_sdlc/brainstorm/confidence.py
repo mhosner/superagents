@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from langgraph.types import interrupt
 
+from superagents_sdlc.brainstorm.idea_memory import IdeaMemory
 from superagents_sdlc.brainstorm.prompts import (
     BRAINSTORM_SYSTEM,
     _build_brainstorm_cached_prefix,
@@ -37,35 +38,24 @@ DEFAULT_CONFIDENCE_THRESHOLD = 80
 DEFAULT_MAX_ROUNDS = 10
 
 _ASSESSMENT_PROMPT = """\
-## Decisions Made So Far
+## IdeaMemory — Canonical Decisions
 
-The following decisions have been confirmed by the user during this brainstorm \
-session. These are FINAL — do not contradict, reinterpret, or question them. \
-Your readiness assessment must be consistent with these decisions.
+The following decisions are FINAL. They were recorded exactly as the user \
+stated them. You MUST NOT contradict, reinterpret, narrow, extend, or \
+synthesize beyond what is written here.
 
-{transcript}
+{idea_memory}
 
-Step 1: Write out each decision verbatim (before your JSON).
-For each decision above, write: \
-"Decision N: The user decided: [copy the DECIDED text exactly]"
-
-Step 2: Produce your JSON assessment (consistent with Step 1).
-Rate each section's readiness. Your ratings MUST be consistent with \
-the decisions you echoed in Step 1.
-
-CRITICAL RULES:
-- Do NOT infer decisions the user did not make
-- Do NOT extend a decision beyond its literal text
-- Do NOT combine or synthesize multiple decisions into a new conclusion
-- If a decision directly answers a gap, that gap is closed — do not list it
-- Only reference decisions that appear in the "Decisions Made So Far" section
+Rate each section's readiness based ONLY on what IdeaMemory contains. \
+If IdeaMemory has no entry for a section, rate it "low". \
+If IdeaMemory has a clear decision for a section, rate it "high".
 
 Readiness ratings:
 - "high": Could write this section now with confidence
 - "medium": Have partial information, brief would have gaps
 - "low": Missing critical information, section would be speculative
 
-Sections to rate the readiness of:
+Sections to rate:
 1. problem_statement — Is the problem clear?
 2. users_and_personas — Do we know who uses this and how?
 3. requirements — Are functional requirements specific enough?
@@ -75,10 +65,9 @@ Sections to rate the readiness of:
 
 {deferred_note}
 
-Return ONLY valid JSON (after your Step 1 echo):
-For the "evidence" field: quote ONLY from the Decisions Made block above. \
-Do not synthesize, interpret, or extend. If no decision addresses this \
-section, write "No decision made yet."
+Return ONLY valid JSON:
+For the "evidence" field: quote ONLY from IdeaMemory above. \
+If no entry addresses this section, write "No decision made yet."
 {{"sections": {{"problem_statement": {{"readiness": "high", "evidence": "..."}}, ...}}, \
 "gaps": [{{"section": "...", "description": "..."}}], \
 "recommendation": "continue" | "ready"}}
@@ -167,8 +156,14 @@ def make_estimate_confidence_node(
             codebase_context=state["codebase_context"],
         )
 
+        memory = IdeaMemory.from_state(
+            state["idea"],
+            list(state.get("idea_memory", [])),
+            dict(state.get("idea_memory_counts", {"decision": 0, "rejection": 0})),
+        )
+
         prompt = _ASSESSMENT_PROMPT.format(
-            transcript=_format_transcript_for_assessment(state["transcript"]),
+            idea_memory=memory.format_for_prompt(),
             deferred_note=deferred_note,
         )
         raw = await llm.generate(

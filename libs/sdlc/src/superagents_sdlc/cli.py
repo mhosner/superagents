@@ -255,7 +255,7 @@ def _brainstorm_stub_responses() -> dict[str, str]:
         # in synthesize prompt.
         "Synthesize all": "# Design Brief\nStub design brief for testing.",
         # Confidence assessment — must come before question prompt keys
-        "rate the readiness": json.dumps({
+        "Readiness ratings": json.dumps({
             "sections": {
                 "problem_statement": {"readiness": "high", "evidence": "clear"},
                 "users_and_personas": {"readiness": "high", "evidence": "clear"},
