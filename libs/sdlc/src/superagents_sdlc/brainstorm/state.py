@@ -25,6 +25,8 @@ class BrainstormState(TypedDict):
         brief: Final synthesized design brief.
         status: Current subgraph phase.
         brief_revision_count: Brief revision counter (max 2).
+        idea_memory: Structured memory entries from brainstorm decisions.
+        idea_memory_counts: Counts of memory entries by type.
     """
 
     idea: str
@@ -43,3 +45,5 @@ class BrainstormState(TypedDict):
     brief: str
     status: str
     brief_revision_count: int
+    idea_memory: list[dict]
+    idea_memory_counts: dict

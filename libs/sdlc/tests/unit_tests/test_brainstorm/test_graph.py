@@ -31,6 +31,8 @@ def _initial_state() -> dict:
         "brief": "",
         "status": "exploring",
         "brief_revision_count": 0,
+        "idea_memory": [],
+        "idea_memory_counts": {"decision": 0, "rejection": 0},
     }
 
 

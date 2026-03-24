@@ -102,6 +102,8 @@ def make_explore_context_node() -> Callable[..., Any]:
             "gaps": [],
             "deferred_sections": [],
             "round_number": 0,
+            "idea_memory": [],
+            "idea_memory_counts": {"decision": 0, "rejection": 0},
         }
 
     return explore_context

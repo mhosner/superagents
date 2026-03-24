@@ -45,6 +45,8 @@ def _make_state(**overrides: object) -> dict:
         "brief": "",
         "status": "exploring",
         "brief_revision_count": 0,
+        "idea_memory": [],
+        "idea_memory_counts": {"decision": 0, "rejection": 0},
     }
     base.update(overrides)
     return base
@@ -57,7 +59,7 @@ def _raise_interrupt(value):
 def test_brainstorm_state_is_typeddict():
     state: BrainstormState = _make_state()  # type: ignore[assignment]
     assert state["status"] == "exploring"
-    assert len(state) == 16
+    assert len(state) == 18
 
 
 async def test_explore_context_initializes_state():
