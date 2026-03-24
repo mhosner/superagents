@@ -6,7 +6,6 @@ Provides ``compute_confidence`` (pure math) and the
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from langgraph.types import interrupt
@@ -44,7 +43,10 @@ _ASSESSMENT_PROMPT = """\
 ## Codebase context
 {codebase_context}
 
-## Q&A transcript
+## Decisions Made So Far
+
+The following decisions have been confirmed by the user during this brainstorm session. These are FINAL — do not contradict, reinterpret, or question them. Your readiness assessment must be consistent with these decisions.
+
 {transcript}
 
 Assess the brainstorm readiness. For each section below, rate the readiness \
@@ -152,7 +154,7 @@ def make_estimate_confidence_node(
             idea=state["idea"],
             product_context=state["product_context"],
             codebase_context=state["codebase_context"],
-            transcript=json.dumps(state["transcript"]),
+            transcript=_format_transcript_for_assessment(state["transcript"]),
             deferred_note=deferred_note,
         )
         raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM)

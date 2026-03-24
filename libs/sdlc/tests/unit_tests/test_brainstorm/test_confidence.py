@@ -254,3 +254,37 @@ def test_format_transcript_multiple_entries():
     # Excluded options should not appear
     assert "Bad UX" not in result
     assert "Go + K8s" not in result
+
+
+# -- Wiring tests: formatted transcript in confidence prompt --
+
+
+async def test_confidence_prompt_contains_decisions_framing():
+    """Assessment prompt must frame transcript as settled decisions."""
+    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    node = make_estimate_confidence_node(llm)
+    await node(_make_state())
+
+    prompt = llm.calls[0][0]
+    assert "Decisions Made So Far" in prompt
+    assert "FINAL" in prompt
+
+
+async def test_confidence_prompt_uses_formatted_transcript():
+    """Assessment prompt uses formatted transcript, not raw JSON."""
+    transcript = [
+        {
+            "question": "Trigger method?",
+            "answer": "Automatic sub-step",
+            "options": ["Automatic sub-step", "/sfn-analyze slash command"],
+            "targets_section": "scope_boundaries",
+        }
+    ]
+    llm = StubLLMClient(responses={"rate the readiness": _high_assessment()})
+    node = make_estimate_confidence_node(llm)
+    await node(_make_state(transcript=transcript))
+
+    prompt = llm.calls[0][0]
+    assert "**DECIDED:** Automatic sub-step" in prompt
+    assert "/sfn-analyze slash command" not in prompt
+    assert "json" not in prompt.lower().split("return only valid json")[0]
