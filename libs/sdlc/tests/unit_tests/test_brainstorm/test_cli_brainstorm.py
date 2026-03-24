@@ -131,6 +131,22 @@ def test_brainstorm_no_output_dir():
     assert "Design Brief" in result.stdout
 
 
+def test_idea_memory_written_to_disk(tmp_path):
+    """IdeaMemory file is written alongside the brief."""
+    from superagents_sdlc.brainstorm.idea_memory import IdeaMemory
+
+    mem = IdeaMemory(idea_title="Test")
+    mem.add_decision(title="Tech", text="Use Go")
+
+    out = tmp_path / "output"
+    out.mkdir()
+    (out / "idea_memory.md").write_text(mem.to_markdown())
+
+    content = (out / "idea_memory.md").read_text()
+    assert "IdeaMemory: Test" in content
+    assert "Use Go" in content
+
+
 def test_extract_section_content_from_json():
     """JSON string with a ``content`` field returns only the content value."""
     raw = json.dumps({
