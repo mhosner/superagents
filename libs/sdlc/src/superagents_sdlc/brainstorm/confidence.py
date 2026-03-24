@@ -45,7 +45,9 @@ _ASSESSMENT_PROMPT = """\
 
 ## Decisions Made So Far
 
-The following decisions have been confirmed by the user during this brainstorm session. These are FINAL — do not contradict, reinterpret, or question them. Your readiness assessment must be consistent with these decisions.
+The following decisions have been confirmed by the user during this brainstorm \
+session. These are FINAL — do not contradict, reinterpret, or question them. \
+Your readiness assessment must be consistent with these decisions.
 
 {transcript}
 
@@ -99,7 +101,7 @@ def _format_transcript_for_assessment(transcript: list[dict]) -> str:
             f"**DECIDED:** {entry['answer']}"
         )
         blocks.append(block)
-    return "\n".join(blocks)
+    return "\n\n".join(blocks)
 
 
 def compute_confidence(sections: dict, deferred: list[str]) -> int:

@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 from langgraph.types import interrupt
 
-from superagents_sdlc.skills.json_utils import extract_json
-
 from superagents_sdlc.brainstorm.confidence import _format_transcript_for_assessment
 from superagents_sdlc.brainstorm.prompts import (
     APPROACHES_PROMPT,
@@ -19,6 +17,7 @@ from superagents_sdlc.brainstorm.prompts import (
     QUESTION_PROMPT,
     SYNTHESIZE_PROMPT,
 )
+from superagents_sdlc.skills.json_utils import extract_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable

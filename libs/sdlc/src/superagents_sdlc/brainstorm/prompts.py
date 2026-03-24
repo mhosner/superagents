@@ -20,7 +20,9 @@ QUESTION_PROMPT = """\
 
 ## Decisions Made So Far
 
-The following decisions have been confirmed by the user during this brainstorm session. These are FINAL — do not contradict, reinterpret, or question them. Do not re-ask about decided topics.
+The following decisions have been confirmed by the user during this brainstorm \
+session. These are FINAL — do not contradict, reinterpret, or question them. \
+Do not re-ask about decided topics.
 
 {transcript}
 
@@ -45,7 +47,9 @@ APPROACHES_PROMPT = """\
 
 ## Decisions Made So Far
 
-The following decisions have been confirmed by the user during this brainstorm session. These are FINAL — do not contradict, reinterpret, or question them. All proposed approaches must be consistent with these decisions.
+The following decisions have been confirmed by the user during this brainstorm \
+session. These are FINAL — do not contradict, reinterpret, or question them. \
+All proposed approaches must be consistent with these decisions.
 
 {transcript}
 
@@ -69,7 +73,9 @@ DESIGN_SECTION_PROMPT = """\
 
 ## Decisions Made So Far
 
-The following decisions have been confirmed by the user during this brainstorm session. These are FINAL — do not contradict, reinterpret, or question them. This section must reflect these decisions accurately.
+The following decisions have been confirmed by the user during this brainstorm \
+session. These are FINAL — do not contradict, reinterpret, or question them. \
+This section must reflect these decisions accurately.
 
 {transcript}
 
