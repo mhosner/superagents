@@ -8,6 +8,36 @@ BRAINSTORM_SYSTEM = (
     "Always return valid JSON when the prompt requests JSON output."
 )
 
+
+def _build_brainstorm_cached_prefix(
+    *,
+    idea: str,
+    product_context: str,
+    codebase_context: str,
+) -> str | None:
+    """Build the stable cached prefix for brainstorm LLM calls.
+
+    Assembles the context that does not change between calls in a
+    brainstorm session: the idea, product context, and codebase context.
+
+    Args:
+        idea: The feature idea being brainstormed.
+        product_context: Product context from context files.
+        codebase_context: Codebase context from file analysis.
+
+    Returns:
+        Formatted prefix string, or None if all fields are empty.
+    """
+    parts = []
+    for header, value in [
+        ("Idea", idea),
+        ("Product context", product_context),
+        ("Codebase context", codebase_context),
+    ]:
+        if value:
+            parts.append(f"## {header}\n{value}")
+    return "\n\n".join(parts) if parts else None
+
 QUESTION_PROMPT = """\
 ## Idea
 {idea}

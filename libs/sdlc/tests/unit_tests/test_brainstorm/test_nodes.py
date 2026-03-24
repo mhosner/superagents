@@ -393,3 +393,43 @@ async def test_batch_questions_all_resolved():
     assert result["transcript"][0]["answer"] == "JSON"
     assert result["transcript"][1]["answer"] == "Lambda"
     assert result["transcript"][2]["answer"] == "free text"
+
+
+# -- _build_brainstorm_cached_prefix tests --
+
+
+from superagents_sdlc.brainstorm.prompts import _build_brainstorm_cached_prefix
+
+
+def test_build_brainstorm_cached_prefix_includes_stable_context():
+    """Cached prefix contains idea, product context, and codebase context."""
+    prefix = _build_brainstorm_cached_prefix(
+        idea="Add dark mode",
+        product_context="Web app for developers",
+        codebase_context="React + TypeScript frontend",
+    )
+    assert "Add dark mode" in prefix
+    assert "Web app for developers" in prefix
+    assert "React + TypeScript frontend" in prefix
+
+
+def test_build_brainstorm_cached_prefix_has_section_headers():
+    """Cached prefix uses markdown headers for structure."""
+    prefix = _build_brainstorm_cached_prefix(
+        idea="Feature X",
+        product_context="Context Y",
+        codebase_context="Code Z",
+    )
+    assert "## Idea" in prefix
+    assert "## Product context" in prefix
+    assert "## Codebase context" in prefix
+
+
+def test_build_brainstorm_cached_prefix_returns_none_when_empty():
+    """Returns None when all fields are empty strings."""
+    prefix = _build_brainstorm_cached_prefix(
+        idea="",
+        product_context="",
+        codebase_context="",
+    )
+    assert prefix is None
