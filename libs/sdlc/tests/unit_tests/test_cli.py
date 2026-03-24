@@ -555,3 +555,88 @@ def test_interactive_quit(tmp_path):
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "Quit" in result.stdout or "Certification" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# _SpinnerLLMClient tests
+# ---------------------------------------------------------------------------
+
+
+from superagents_sdlc.cli import _SpinnerLLMClient  # noqa: E402
+
+
+class _FakeLLM:
+    """Minimal LLM stub for spinner wrapper tests."""
+
+    def __init__(self, *, response: str = "ok") -> None:
+        self.calls: list[tuple[str, str, str | None]] = []
+        self._response = response
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        cached_prefix: str | None = None,
+    ) -> str:
+        self.calls.append((prompt, system, cached_prefix))
+        return self._response
+
+
+class _FakeSpinner:
+    """Records start/stop calls for assertion."""
+
+    def __init__(self) -> None:
+        self.history: list[str] = []
+
+    def start(self, phrase: str) -> None:
+        self.history.append(f"start:{phrase}")
+
+    def stop(self) -> None:
+        self.history.append("stop")
+
+
+async def test_spinner_llm_client_delegates_to_inner():
+    """Wrapper delegates generate() args to the inner LLM."""
+    inner = _FakeLLM(response="hello")
+    spinner = _FakeSpinner()
+    wrapper = _SpinnerLLMClient(inner, spinner)
+
+    result = await wrapper.generate(
+        "prompt", system="sys", cached_prefix="prefix",
+    )
+
+    assert result == "hello"
+    assert inner.calls == [("prompt", "sys", "prefix")]
+
+
+async def test_spinner_llm_client_starts_and_stops_spinner():
+    """Wrapper starts spinner before LLM call and stops after."""
+    inner = _FakeLLM()
+    spinner = _FakeSpinner()
+    wrapper = _SpinnerLLMClient(inner, spinner)
+
+    await wrapper.generate("prompt")
+
+    # Must have at least one start and one stop
+    assert any(h.startswith("start:") for h in spinner.history)
+    assert spinner.history[-1] == "stop"
+
+
+async def test_spinner_llm_client_stops_on_error():
+    """Spinner stops even if the inner LLM raises."""
+
+    class _FailLLM:
+        async def generate(self, prompt: str, *, system: str = "", cached_prefix: str | None = None) -> str:
+            msg = "boom"
+            raise RuntimeError(msg)
+
+    spinner = _FakeSpinner()
+    wrapper = _SpinnerLLMClient(_FailLLM(), spinner)
+
+    try:
+        await wrapper.generate("prompt")
+    except RuntimeError:
+        pass
+
+    assert spinner.history[-1] == "stop"

@@ -17,6 +17,51 @@ if TYPE_CHECKING:
     from superagents_sdlc.workflows.orchestrator import PipelineOrchestrator
     from superagents_sdlc.workflows.result import PipelineResult
 
+class _SpinnerLLMClient:
+    """LLMClient wrapper that shows a spinner during generate() calls.
+
+    Starts the spinner with a random superhero phrase before each call
+    and stops it when the call completes (or raises).
+
+    Args:
+        inner: The actual LLM client to delegate to.
+        spinner: Spinner instance from `cli_spinner`.
+    """
+
+    def __init__(self, inner: LLMClient, spinner: object) -> None:
+        self._inner = inner
+        self._spinner = spinner
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        cached_prefix: str | None = None,
+    ) -> str:
+        """Delegate to inner LLM with spinner active during the call.
+
+        Args:
+            prompt: User prompt.
+            system: Optional system prompt.
+            cached_prefix: Optional stable context to cache.
+
+        Returns:
+            Raw response string from the inner LLM.
+        """
+        import random  # noqa: PLC0415
+
+        from superagents_sdlc.cli_spinner import PHRASES  # noqa: PLC0415
+
+        self._spinner.start(random.choice(PHRASES))  # noqa: S311
+        try:
+            return await self._inner.generate(
+                prompt, system=system, cached_prefix=cached_prefix,
+            )
+        finally:
+            self._spinner.stop()
+
+
 # Named context files recognized by the loader.
 _CONTEXT_FILES: dict[str, str] = {
     "product_context.md": "product_context",
