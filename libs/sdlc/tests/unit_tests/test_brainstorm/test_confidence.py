@@ -11,6 +11,7 @@ from langgraph.errors import GraphInterrupt
 from superagents_sdlc.brainstorm.confidence import (
     READINESS_SCORES,
     SECTIONS,
+    _format_transcript_for_assessment,
     compute_confidence,
     make_estimate_confidence_node,
 )
@@ -177,3 +178,79 @@ async def test_estimate_override_forces_proceed():
         result = await node(_make_state())
 
     assert result["status"] == "proposing"
+
+
+# -- _format_transcript_for_assessment tests --
+
+
+def test_format_transcript_empty():
+    """Empty transcript returns a placeholder message."""
+    result = _format_transcript_for_assessment([])
+    assert result == "No questions have been asked yet."
+
+
+def test_format_transcript_single_entry():
+    """Single Q&A formats as Decision 1 with DECIDED label."""
+    transcript = [
+        {
+            "question": "Who is the target user?",
+            "answer": "Mobile developers",
+            "options": None,
+            "targets_section": "users_and_personas",
+        }
+    ]
+    result = _format_transcript_for_assessment(transcript)
+    assert "### Decision 1" in result
+    assert "**Question:** Who is the target user?" in result
+    assert "**DECIDED:** Mobile developers" in result
+
+
+def test_format_transcript_excludes_options():
+    """Options list must not appear in formatted output."""
+    transcript = [
+        {
+            "question": "Which database?",
+            "answer": "PostgreSQL",
+            "options": ["MySQL", "PostgreSQL", "SQLite"],
+            "targets_section": "technical_constraints",
+        }
+    ]
+    result = _format_transcript_for_assessment(transcript)
+    assert "PostgreSQL" in result
+    assert "MySQL" not in result
+    assert "SQLite" not in result
+    assert "Option" not in result
+
+
+def test_format_transcript_multiple_entries():
+    """Three Q&As numbered Decision 1/2/3 with correct answers."""
+    transcript = [
+        {
+            "question": "What problem?",
+            "answer": "Slow deployments",
+            "options": ["Slow deployments", "Bad UX"],
+            "targets_section": "problem_statement",
+        },
+        {
+            "question": "Who uses it?",
+            "answer": "DevOps engineers",
+            "options": None,
+            "targets_section": "users_and_personas",
+        },
+        {
+            "question": "What stack?",
+            "answer": "Python + Docker",
+            "options": ["Python + Docker", "Go + K8s"],
+            "targets_section": "technical_constraints",
+        },
+    ]
+    result = _format_transcript_for_assessment(transcript)
+    assert "### Decision 1" in result
+    assert "### Decision 2" in result
+    assert "### Decision 3" in result
+    assert "**DECIDED:** Slow deployments" in result
+    assert "**DECIDED:** DevOps engineers" in result
+    assert "**DECIDED:** Python + Docker" in result
+    # Excluded options should not appear
+    assert "Bad UX" not in result
+    assert "Go + K8s" not in result
