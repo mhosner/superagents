@@ -365,6 +365,18 @@ def test_orchestrator_builds_cached_prefix_empty_when_no_context():
     assert prefix is None
 
 
+def test_cached_prefix_includes_idea_memory():
+    """Orchestrator includes IdeaMemory in cached prefix when provided."""
+    orchestrator, _ = _make_orchestrator()
+    params = {
+        "idea_memory": "# IdeaMemory: Test\n## Locked Decisions\n### D1: Tech [decision]\nUse Go",
+    }
+    prefix = orchestrator._build_cached_prefix(params)
+    assert prefix is not None
+    assert "IdeaMemory" in prefix
+    assert "Use Go" in prefix
+
+
 async def test_plan_from_spec_passes_cached_prefix_to_skills(exporter, tmp_path):
     """Skill contexts in run_plan_from_spec have cached_prefix populated."""
     orchestrator, stub_llm = _make_orchestrator()

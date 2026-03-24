@@ -155,6 +155,7 @@ class PipelineOrchestrator:
         """
         parts = []
         for key, header in [
+            ("idea_memory", "IdeaMemory — Locked Decisions"),
             ("tech_spec", "Technical specification"),
             ("implementation_plan", "Implementation plan"),
             ("user_stories", "User stories"),

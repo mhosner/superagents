@@ -158,6 +158,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use StubLLMClient instead of Anthropic (development testing only).",
     )
+    shared.add_argument(
+        "--idea-memory",
+        type=Path,
+        default=None,
+        help="Path to IdeaMemory file from brainstorm.",
+    )
 
     parser = argparse.ArgumentParser(
         prog="superagents-sdlc",
@@ -529,6 +535,18 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
         (out / "design_brief.md").write_text(brief)
         if not args.quiet:
             print(f"\nBrief written to {out / 'design_brief.md'}")  # noqa: T201
+
+        # Write IdeaMemory
+        from superagents_sdlc.brainstorm.idea_memory import IdeaMemory  # noqa: PLC0415
+
+        memory = IdeaMemory.from_state(
+            args.idea,
+            result.get("idea_memory", []),
+            result.get("idea_memory_counts", {"decision": 0, "rejection": 0}),
+        )
+        (out / "idea_memory.md").write_text(memory.to_markdown())
+        if not args.quiet:
+            print(f"IdeaMemory written to {out / 'idea_memory.md'}")  # noqa: T201
 
     return 0
 
@@ -944,6 +962,8 @@ async def _run(args: argparse.Namespace) -> int:
         context["brief"] = Path(args.brief).read_text()
     if hasattr(args, "codebase_context") and args.codebase_context:
         context["codebase_context"] = Path(args.codebase_context).read_text()
+    if getattr(args, "idea_memory", None):
+        context["idea_memory"] = args.idea_memory.read_text()
 
     # Build LLM clients
     fast_llm: LLMClient | None = None
