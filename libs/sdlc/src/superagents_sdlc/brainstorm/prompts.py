@@ -65,7 +65,10 @@ APPROACHES_PROMPT = """\
 
 {idea_memory}
 
-All approaches must be consistent with IdeaMemory.
+All approaches must be consistent with every IdeaMemory entry. \
+Do not propose approaches that contradict any decision or rejection. \
+If IdeaMemory says "no new command", no approach may introduce a command. \
+If IdeaMemory specifies a file location, all approaches must use that location.
 
 Propose 2-3 distinct implementation approaches. Each should have a clear name, \
 description, and honest tradeoffs section.
@@ -80,7 +83,17 @@ DESIGN_SECTION_PROMPT = """\
 
 {idea_memory}
 
-This section must reflect IdeaMemory decisions exactly.
+MANDATORY: Before outputting this section, verify it against \
+every IdeaMemory entry. For each entry, confirm your section \
+does not contradict it. Specifically check:
+- If IdeaMemory specifies a file path or location, use that exact path — do not invent a different one
+- If IdeaMemory specifies a trigger mechanism, describe that exact mechanism — do not substitute another
+- If IdeaMemory specifies what is out of scope, include it in Non-Goals
+- If IdeaMemory specifies an output format, use that format
+- If IdeaMemory says "qualitative", do not produce numeric formulas
+- If IdeaMemory says "no new command", do not introduce one
+
+Any contradiction between your section and IdeaMemory is an error. IdeaMemory always wins.
 
 ## Previously approved sections
 {approved_sections}
@@ -97,7 +110,9 @@ SYNTHESIZE_PROMPT = """\
 
 {idea_memory}
 
-The brief must incorporate every IdeaMemory entry.
+The brief must incorporate every IdeaMemory entry. Before \
+finalizing, verify each entry against the brief text. Any \
+contradiction is an error — IdeaMemory always wins.
 
 ## Approved design sections
 {sections}
