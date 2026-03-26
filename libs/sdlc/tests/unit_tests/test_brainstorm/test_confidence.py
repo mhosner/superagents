@@ -82,6 +82,8 @@ def _make_state(**overrides):
         "brief_revision_count": 0,
         "idea_memory": [],
         "idea_memory_counts": {"decision": 0, "rejection": 0},
+        "stall_counter": 0,
+        "previous_confidence": 0.0,
     }
     base.update(overrides)
     return base
@@ -162,11 +164,94 @@ async def test_estimate_with_deferred_sections():
     assert result["confidence_score"] == 75
 
 
-async def test_estimate_max_rounds_forces_proceed():
+async def test_stall_counter_resets_on_significant_gain():
+    """Confidence gain >= 2 resets stall_counter to 0."""
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
-    result = await node(_make_state(round_number=10))
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(
+            previous_confidence=50.0,
+            stall_counter=2,
+        ))
+
+    # Low assessment gives score 60: (90+90+60+30+60+30)/6=60
+    # Delta = 60 - 50 = 10, >= 2 → reset
+    assert result["stall_counter"] == 0
+    assert result["previous_confidence"] == float(result["confidence_score"])
+    assert result["status"] == "questioning"
+
+
+async def test_stall_counter_resets_on_confidence_drop():
+    """Confidence drop resets stall_counter (drop means new info)."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(
+            previous_confidence=70.0,
+            stall_counter=2,
+        ))
+
+    # Score = 60, delta = 60 - 70 = -10, drop → reset
+    assert result["stall_counter"] == 0
+    assert result["status"] == "questioning"
+
+
+async def test_stall_counter_increments_on_flat_confidence():
+    """Confidence change < 2 (flat/wobble) increments stall_counter."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(
+            previous_confidence=60.0,
+            stall_counter=0,
+        ))
+
+    # Score = 60, delta = 0, < 2 → increment
+    assert result["stall_counter"] == 1
+    assert result["status"] == "questioning"
+
+
+async def test_stall_counter_triggers_stall_exit_at_three():
+    """When stall_counter reaches 3, status becomes 'stalled'."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    # No interrupt patch needed — stall exit skips the confidence interrupt
+    result = await node(_make_state(
+        previous_confidence=60.0,
+        stall_counter=2,
+    ))
+
+    # Score = 60, delta = 0, stall_counter was 2 → becomes 3 → stalled
+    assert result["stall_counter"] == 3
+    assert result["status"] == "stalled"
+
+
+async def test_stall_check_uses_first_round_correctly():
+    """First round (previous_confidence=0.0) with any score >= 2 resets counter."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(
+            previous_confidence=0.0,
+            stall_counter=0,
+        ))
+
+    # Score = 60, delta = 60 - 0 = 60, >= 2 → reset
+    assert result["stall_counter"] == 0
+    assert result["status"] == "questioning"
+
+
+async def test_safety_cap_forces_proceed():
+    """Absolute safety cap (50 rounds) forces proceed."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    result = await node(_make_state(round_number=50))
 
     assert result["status"] == "proposing"
 
@@ -223,3 +308,20 @@ async def test_confidence_node_passes_cached_prefix():
     assert "Build search feature" not in prompt
     assert "Enterprise SaaS" not in prompt
     assert "Python FastAPI backend" not in prompt
+
+
+async def test_low_confidence_no_stall_keeps_questioning():
+    """B-08 verify: confidence < threshold + no stall = keeps questioning."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(
+            previous_confidence=30.0,
+            stall_counter=0,
+        ))
+
+    # Score 60 > prev 30 → delta 30 → reset counter → questioning
+    assert result["confidence_score"] < 80
+    assert result["status"] == "questioning"
+    assert result["stall_counter"] == 0

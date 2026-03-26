@@ -51,10 +51,11 @@ Do not ask about topics already decided in IdeaMemory.
 ## Gaps to address
 {gaps}
 
-Generate clarifying questions ONLY about sections rated "low" or "medium". \
+Generate exactly 1 question — the single most important question to resolve next \
+given the current IdeaMemory state. \
+Only ask about sections rated "low" or "medium". \
 Never ask about "high" or "deferred" sections. \
-Generate 1 question per gap, up to 4 questions max. \
-Each question should be specific enough that the answer directly moves a section toward "high". \
+The question should be specific enough that the answer directly moves a section toward "high". \
 Prefer multiple-choice when the answer space is bounded. \
 Return as JSON: {{"questions": [{{"question": "...", "options": ["a", "b"] | null, \
 "targets_section": "section_name"}}]}}

@@ -27,6 +27,8 @@ class BrainstormState(TypedDict):
         brief_revision_count: Brief revision counter (max 2).
         idea_memory: Structured memory entries from brainstorm decisions.
         idea_memory_counts: Counts of memory entries by type.
+        stall_counter: Consecutive questions with < 2pt confidence gain.
+        previous_confidence: Confidence score from prior iteration.
     """
 
     idea: str
@@ -47,3 +49,5 @@ class BrainstormState(TypedDict):
     brief_revision_count: int
     idea_memory: list[dict]
     idea_memory_counts: dict
+    stall_counter: int
+    previous_confidence: float

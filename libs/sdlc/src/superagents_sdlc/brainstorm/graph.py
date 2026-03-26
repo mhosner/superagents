@@ -13,6 +13,7 @@ from superagents_sdlc.brainstorm.nodes import (
     make_generate_design_section_node,
     make_generate_question_node,
     make_propose_approaches_node,
+    make_stall_exit_node,
     make_synthesize_brief_node,
 )
 from superagents_sdlc.brainstorm.state import BrainstormState
@@ -27,7 +28,7 @@ def build_brainstorm_graph(
     *,
     checkpointer: object | None = None,
     confidence_threshold: int = 80,
-    max_rounds: int = 10,
+    max_rounds: int | None = None,  # noqa: ARG001
 ) -> CompiledStateGraph:
     """Build and compile the brainstorm subgraph.
 
@@ -35,7 +36,7 @@ def build_brainstorm_graph(
         llm: LLM client for node generation.
         checkpointer: LangGraph checkpointer. Defaults to InMemorySaver.
         confidence_threshold: Confidence score to auto-proceed.
-        max_rounds: Hard cap on question rounds.
+        max_rounds: Deprecated. Stall detection replaces the hard cap.
 
     Returns:
         Compiled StateGraph ready for invocation.
@@ -48,9 +49,10 @@ def build_brainstorm_graph(
     # Add nodes
     builder.add_node("explore_context", make_explore_context_node())
     builder.add_node("estimate_confidence", make_estimate_confidence_node(
-        llm, threshold=confidence_threshold, max_rounds=max_rounds,
+        llm, threshold=confidence_threshold,
     ))
     builder.add_node("generate_question", make_generate_question_node(llm))
+    builder.add_node("stall_exit", make_stall_exit_node())
     builder.add_node("propose_approaches", make_propose_approaches_node(llm))
     builder.add_node("generate_design_section", make_generate_design_section_node(llm))
     builder.add_node("synthesize_brief", make_synthesize_brief_node(llm))
@@ -62,12 +64,27 @@ def build_brainstorm_graph(
     # After questions → estimate confidence again
     builder.add_edge("generate_question", "estimate_confidence")
 
+    # After stall_exit → route based on status
+    def route_after_stall_exit(state: BrainstormState) -> str:
+        """Route after stall exit decision."""
+        if state["status"] == "proposing":
+            return "propose_approaches"
+        return "generate_question"
+
+    builder.add_conditional_edges(
+        "stall_exit",
+        route_after_stall_exit,
+        ["propose_approaches", "generate_question"],
+    )
+
     # After approach selection → design sections
     builder.add_edge("propose_approaches", "generate_design_section")
 
     # Conditional: after confidence estimation
     def route_after_confidence(state: BrainstormState) -> str:
-        """Route to questions or forward to approaches."""
+        """Route to questions, stall exit, or approaches."""
+        if state["status"] == "stalled":
+            return "stall_exit"
         if state["status"] == "questioning":
             return "generate_question"
         return "propose_approaches"
@@ -75,7 +92,7 @@ def build_brainstorm_graph(
     builder.add_conditional_edges(
         "estimate_confidence",
         route_after_confidence,
-        ["generate_question", "propose_approaches"],
+        ["generate_question", "stall_exit", "propose_approaches"],
     )
 
     # Conditional: after design section

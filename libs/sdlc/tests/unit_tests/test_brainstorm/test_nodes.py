@@ -16,6 +16,7 @@ from superagents_sdlc.brainstorm.nodes import (
     make_generate_design_section_node,
     make_generate_question_node,
     make_propose_approaches_node,
+    make_stall_exit_node,
     make_synthesize_brief_node,
 )
 from superagents_sdlc.skills.llm import StubLLMClient
@@ -47,6 +48,8 @@ def _make_state(**overrides: object) -> dict:
         "brief_revision_count": 0,
         "idea_memory": [],
         "idea_memory_counts": {"decision": 0, "rejection": 0},
+        "stall_counter": 0,
+        "previous_confidence": 0.0,
     }
     base.update(overrides)
     return base
@@ -59,7 +62,7 @@ def _raise_interrupt(value):
 def test_brainstorm_state_is_typeddict():
     state: BrainstormState = _make_state()  # type: ignore[assignment]
     assert state["status"] == "exploring"
-    assert len(state) == 18
+    assert len(state) == 20
 
 
 async def test_explore_context_initializes_state():
@@ -684,3 +687,72 @@ async def test_decision_title_uses_section_titles():
         result = await node(_make_state())
 
     assert result["idea_memory"][0]["title"] == "Technical Constraints & Dependencies"
+
+
+def test_question_prompt_requests_single_question():
+    """QUESTION_PROMPT must request exactly 1 question, not multiple."""
+    from superagents_sdlc.brainstorm.prompts import QUESTION_PROMPT
+    assert "exactly 1 question" in QUESTION_PROMPT
+    assert "up to 4 questions" not in QUESTION_PROMPT
+
+
+# -- stall_exit node tests --
+
+
+async def test_stall_exit_interrupts_with_gaps():
+    """Stall exit node interrupts with stall info and options."""
+    node = make_stall_exit_node()
+
+    captured = {}
+
+    def capture_interrupt(value):
+        captured.update(value)
+        raise GraphInterrupt(value)
+
+    with (
+        patch(_INTERRUPT_PATH, side_effect=capture_interrupt),
+        pytest.raises(GraphInterrupt),
+    ):
+        await node(_make_state(
+            confidence_score=62,
+            gaps=[
+                {"section": "acceptance_criteria", "description": "No error paths"},
+                {"section": "technical_constraints", "description": "No storage discussion"},
+            ],
+            stall_counter=3,
+        ))
+
+    assert captured["type"] == "stall_exit"
+    assert captured["confidence"] == 62
+    assert len(captured["gaps"]) == 2
+    assert "proceed" in captured["options"]
+    assert "continue" in captured["options"]
+
+
+async def test_stall_exit_proceed_routes_to_approaches():
+    """User choosing 'proceed' sets status to proposing."""
+    node = make_stall_exit_node()
+
+    with patch(_INTERRUPT_PATH, return_value="proceed"):
+        result = await node(_make_state(
+            confidence_score=62,
+            gaps=[{"section": "acceptance_criteria", "description": "gaps"}],
+            stall_counter=3,
+        ))
+
+    assert result["status"] == "proposing"
+
+
+async def test_stall_exit_continue_resets_counter():
+    """User choosing 'continue' resets stall_counter and keeps questioning."""
+    node = make_stall_exit_node()
+
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(
+            confidence_score=62,
+            gaps=[{"section": "acceptance_criteria", "description": "gaps"}],
+            stall_counter=3,
+        ))
+
+    assert result["status"] == "questioning"
+    assert result["stall_counter"] == 0
