@@ -11,6 +11,7 @@ from langgraph.errors import GraphInterrupt
 from superagents_sdlc.brainstorm.confidence import (
     READINESS_SCORES,
     SECTIONS,
+    _ASSESSMENT_PROMPT,
     compute_confidence,
     make_estimate_confidence_node,
 )
@@ -325,3 +326,16 @@ async def test_low_confidence_no_stall_keeps_questioning():
     assert result["confidence_score"] < 80
     assert result["status"] == "questioning"
     assert result["stall_counter"] == 0
+
+
+# -- Anti-fabrication prompt constraints --
+
+
+def test_assessment_prompt_has_verbatim_constraint():
+    """Assessment prompt must instruct LLM to only reference IdeaMemory verbatim."""
+    assert "ONLY reference decisions" in _ASSESSMENT_PROMPT
+
+
+def test_assessment_prompt_has_verification_instruction():
+    """Assessment prompt must instruct LLM to verify summaries against IdeaMemory."""
+    assert "verify each section summary" in _ASSESSMENT_PROMPT

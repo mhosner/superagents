@@ -44,6 +44,14 @@ The following decisions are FINAL. They were recorded exactly as the user \
 stated them. You MUST NOT contradict, reinterpret, narrow, extend, or \
 synthesize beyond what is written here.
 
+CRITICAL: Your section summaries must ONLY reference decisions that appear \
+verbatim in IdeaMemory above. Do not infer implementation details, numeric \
+values, file paths, formulas, or architectural choices that the user did \
+not explicitly state. If IdeaMemory says "weighted separately" you must \
+NOT invent a weighting scheme. If IdeaMemory says "separate file" you must \
+NOT specify which existing file to write to. Summaries must use the same \
+language as IdeaMemory — paraphrase for brevity, never embellish.
+
 {idea_memory}
 
 Rate each section's readiness based ONLY on what IdeaMemory contains. \
@@ -64,6 +72,11 @@ Sections to rate:
 6. technical_constraints — Do we know tech stack and integration points?
 
 {deferred_note}
+
+Before returning your response, verify each section summary against \
+IdeaMemory. For every specific detail in your summary (file names, \
+numbers, formulas, paths, formats), confirm it appears in IdeaMemory. \
+If it doesn't, remove it.
 
 Return ONLY valid JSON:
 For the "evidence" field: quote ONLY from IdeaMemory above. \
