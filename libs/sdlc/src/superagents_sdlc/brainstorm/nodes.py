@@ -120,6 +120,33 @@ def make_explore_context_node() -> Callable[..., Any]:
     return explore_context
 
 
+def make_stall_exit_node() -> Callable[..., Any]:
+    """Create the stall_exit node for confidence plateau handling.
+
+    Returns:
+        Async node function that presents stall exit options.
+    """
+
+    async def stall_exit(state: BrainstormState) -> dict[str, Any]:
+        """Present stall exit options when confidence plateaus."""
+        response = interrupt({
+            "type": "stall_exit",
+            "confidence": state.get("confidence_score", 0),
+            "gaps": state.get("gaps", []),
+            "options": ["proceed", "continue"],
+        })
+
+        response_str = str(response).strip().lower()
+
+        if response_str == "proceed":
+            return {"status": "proposing"}
+
+        # Default: continue questioning with reset counter
+        return {"status": "questioning", "stall_counter": 0}
+
+    return stall_exit
+
+
 def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
     """Create the generate_question node.
 
