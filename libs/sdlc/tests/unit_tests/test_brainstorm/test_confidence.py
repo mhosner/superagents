@@ -308,3 +308,20 @@ async def test_confidence_node_passes_cached_prefix():
     assert "Build search feature" not in prompt
     assert "Enterprise SaaS" not in prompt
     assert "Python FastAPI backend" not in prompt
+
+
+async def test_low_confidence_no_stall_keeps_questioning():
+    """B-08 verify: confidence < threshold + no stall = keeps questioning."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(
+            previous_confidence=30.0,
+            stall_counter=0,
+        ))
+
+    # Score 60 > prev 30 → delta 30 → reset counter → questioning
+    assert result["confidence_score"] < 80
+    assert result["status"] == "questioning"
+    assert result["stall_counter"] == 0
