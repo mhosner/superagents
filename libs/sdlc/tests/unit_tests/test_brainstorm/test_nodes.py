@@ -686,3 +686,10 @@ async def test_decision_title_uses_section_titles():
         result = await node(_make_state())
 
     assert result["idea_memory"][0]["title"] == "Technical Constraints & Dependencies"
+
+
+def test_question_prompt_requests_single_question():
+    """QUESTION_PROMPT must request exactly 1 question, not multiple."""
+    from superagents_sdlc.brainstorm.prompts import QUESTION_PROMPT
+    assert "exactly 1 question" in QUESTION_PROMPT
+    assert "up to 4 questions" not in QUESTION_PROMPT
