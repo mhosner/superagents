@@ -190,6 +190,68 @@ async def test_override_forces_proceed():
     assert interrupts[0].value["type"] == "approaches"
 
 
+async def test_stall_routes_to_stall_exit():
+    """When confidence stalls 3 times, graph routes to stall_exit interrupt."""
+    stub = StubLLMClient(responses={
+        "Readiness ratings": _low_assessment(),
+        "## Gaps to address": json.dumps({
+            "questions": [{"question": "Q?", "options": None, "targets_section": "requirements"}],
+        }),
+    })
+    graph = build_brainstorm_graph(stub)
+    cfg = _config("t-stall")
+
+    # Round 1: confidence interrupt (score ~60, previous 0 → gain 60, no stall)
+    await graph.ainvoke(_initial_state(), cfg)
+    # Continue → question
+    await graph.ainvoke(Command(resume="continue"), cfg)
+    # Answer → confidence reassess (score 60, prev 60 → delta 0, stall_counter=1)
+    await graph.ainvoke(Command(resume=["answer1"]), cfg)
+    # Continue → question
+    await graph.ainvoke(Command(resume="continue"), cfg)
+    # Answer → confidence reassess (delta 0, stall_counter=2)
+    await graph.ainvoke(Command(resume=["answer2"]), cfg)
+    # Continue → question
+    await graph.ainvoke(Command(resume="continue"), cfg)
+    # Answer → confidence reassess (delta 0, stall_counter=3 → stalled)
+    result = await graph.ainvoke(Command(resume=["answer3"]), cfg)
+
+    interrupts = result.get("__interrupt__", ())
+    assert len(interrupts) > 0
+    assert interrupts[0].value["type"] == "stall_exit"
+
+
+async def test_stall_exit_proceed_goes_to_approaches():
+    """From stall_exit, 'proceed' routes to approaches."""
+    stub = StubLLMClient(responses={
+        "Readiness ratings": _low_assessment(),
+        "## Gaps to address": json.dumps({
+            "questions": [{"question": "Q?", "options": None, "targets_section": "requirements"}],
+        }),
+        "Propose 2-3": json.dumps([
+            {"name": "A", "description": "d", "tradeoffs": "t"},
+        ]),
+    })
+    graph = build_brainstorm_graph(stub)
+    cfg = _config("t-stall-proceed")
+
+    # Drive to stall (3 flat confidence rounds)
+    await graph.ainvoke(_initial_state(), cfg)
+    await graph.ainvoke(Command(resume="continue"), cfg)
+    await graph.ainvoke(Command(resume=["a1"]), cfg)
+    await graph.ainvoke(Command(resume="continue"), cfg)
+    await graph.ainvoke(Command(resume=["a2"]), cfg)
+    await graph.ainvoke(Command(resume="continue"), cfg)
+    await graph.ainvoke(Command(resume=["a3"]), cfg)
+
+    # Now at stall_exit interrupt — proceed
+    result = await graph.ainvoke(Command(resume="proceed"), cfg)
+
+    interrupts = result.get("__interrupt__", ())
+    assert len(interrupts) > 0
+    assert interrupts[0].value["type"] == "approaches"
+
+
 async def test_state_snapshot_has_transcript():
     """State snapshot contains transcript after answering questions."""
     stub = StubLLMClient(responses={
