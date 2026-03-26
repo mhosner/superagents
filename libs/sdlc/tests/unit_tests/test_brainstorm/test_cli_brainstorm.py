@@ -161,3 +161,38 @@ def test_extract_section_content_fallback_on_invalid_json():
     """Plain markdown string (not JSON) is returned as-is."""
     raw = "## Problem Statement\nThe app needs dark mode."
     assert _extract_section_content(raw) == raw
+
+
+from superagents_sdlc.cli import _handle_brainstorm_interrupt
+
+
+async def test_stall_exit_handler_proceed():
+    """stall_exit interrupt with 'proceed' returns 'proceed'."""
+    payload = {
+        "type": "stall_exit",
+        "confidence": 62,
+        "gaps": [
+            {"section": "acceptance_criteria", "description": "No error paths"},
+        ],
+        "options": ["proceed", "continue"],
+    }
+    from unittest.mock import AsyncMock, patch
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"):
+        result = await _handle_brainstorm_interrupt(payload, quiet=True)
+    assert result == "proceed"
+
+
+async def test_stall_exit_handler_continue():
+    """stall_exit interrupt with 'continue' returns 'continue'."""
+    payload = {
+        "type": "stall_exit",
+        "confidence": 62,
+        "gaps": [
+            {"section": "acceptance_criteria", "description": "No error paths"},
+        ],
+        "options": ["proceed", "continue"],
+    }
+    from unittest.mock import AsyncMock, patch
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="c"):
+        result = await _handle_brainstorm_interrupt(payload, quiet=True)
+    assert result == "continue"

@@ -339,7 +339,10 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
             if not quiet:
                 target = q.get("targets_section", "")
                 target_label = f" (targets: {target})" if target else ""
-                print(f"\nQuestion {i} of {len(questions)}{target_label}:")  # noqa: T201
+                if len(questions) == 1:
+                    print(f"\nQuestion{target_label}:")  # noqa: T201
+                else:
+                    print(f"\nQuestion {i} of {len(questions)}{target_label}:")  # noqa: T201
                 print(f"  {q['question']}")  # noqa: T201
                 if q.get("options"):
                     from superagents_sdlc.brainstorm.nodes import _clean_option  # noqa: PLC0415
@@ -432,6 +435,23 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         return "approve" if response.strip().lower() in ("a", "approve") else response
+
+    if interrupt_type == "stall_exit":
+        if not quiet:
+            confidence = payload.get("confidence", 0)
+            print(f"\nConfidence plateaued at {confidence}%.")  # noqa: T201
+            if payload.get("gaps"):
+                print("Remaining gaps:")  # noqa: T201
+                for gap in payload["gaps"]:
+                    print(f"  - {gap['section']}: {gap['description']}")  # noqa: T201
+            print("\n  (p)roceed to approaches / (c)ontinue questioning / (q)uit")  # noqa: T201
+        response = await _async_input("> ")
+        if response.strip().lower() in ("q", "quit"):
+            raise _BrainstormQuit
+        choice = response.strip().lower()
+        if choice in ("p", "proceed"):
+            return "proceed"
+        return "continue"
 
     # Unknown interrupt type — generic prompt
     response = await _async_input(f"\n[{interrupt_type}]> ")
