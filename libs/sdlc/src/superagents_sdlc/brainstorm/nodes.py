@@ -113,6 +113,8 @@ def make_explore_context_node() -> Callable[..., Any]:
             "round_number": 0,
             "idea_memory": [],
             "idea_memory_counts": {"decision": 0, "rejection": 0},
+            "stall_counter": 0,
+            "previous_confidence": 0.0,
         }
 
     return explore_context
