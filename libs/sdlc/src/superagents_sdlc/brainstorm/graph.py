@@ -28,6 +28,7 @@ def build_brainstorm_graph(
     *,
     checkpointer: object | None = None,
     confidence_threshold: int = 80,
+    max_rounds: int | None = None,  # noqa: ARG001
 ) -> CompiledStateGraph:
     """Build and compile the brainstorm subgraph.
 
@@ -35,6 +36,7 @@ def build_brainstorm_graph(
         llm: LLM client for node generation.
         checkpointer: LangGraph checkpointer. Defaults to InMemorySaver.
         confidence_threshold: Confidence score to auto-proceed.
+        max_rounds: Deprecated. Stall detection replaces the hard cap.
 
     Returns:
         Compiled StateGraph ready for invocation.

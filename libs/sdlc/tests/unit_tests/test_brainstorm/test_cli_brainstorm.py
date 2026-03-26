@@ -7,7 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from superagents_sdlc.cli import _build_parser, _extract_section_content
+from unittest.mock import AsyncMock, patch
+
+from superagents_sdlc.cli import (
+    _build_parser,
+    _extract_section_content,
+    _handle_brainstorm_interrupt,
+)
 
 
 # Derive cwd from test file location (portable, not hardcoded)
@@ -163,9 +169,6 @@ def test_extract_section_content_fallback_on_invalid_json():
     assert _extract_section_content(raw) == raw
 
 
-from superagents_sdlc.cli import _handle_brainstorm_interrupt
-
-
 async def test_stall_exit_handler_proceed():
     """stall_exit interrupt with 'proceed' returns 'proceed'."""
     payload = {
@@ -176,7 +179,6 @@ async def test_stall_exit_handler_proceed():
         ],
         "options": ["proceed", "continue"],
     }
-    from unittest.mock import AsyncMock, patch
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"):
         result = await _handle_brainstorm_interrupt(payload, quiet=True)
     assert result == "proceed"
@@ -192,7 +194,6 @@ async def test_stall_exit_handler_continue():
         ],
         "options": ["proceed", "continue"],
     }
-    from unittest.mock import AsyncMock, patch
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="c"):
         result = await _handle_brainstorm_interrupt(payload, quiet=True)
     assert result == "continue"
