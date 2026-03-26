@@ -481,9 +481,17 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
 
         llm = AnthropicLLMClient(model=args.model, max_tokens=args.max_tokens)
 
-    # Spinner for LLM call feedback
+    # Banner and spinner
     if not args.quiet:
-        from superagents_sdlc.cli_spinner import Spinner  # noqa: PLC0415
+        from superagents_sdlc.cli_spinner import Spinner, print_banner  # noqa: PLC0415
+
+        try:
+            import importlib.metadata as _meta  # noqa: PLC0415
+
+            version = _meta.version("superagents-sdlc")
+        except _meta.PackageNotFoundError:
+            version = "dev"
+        print_banner(version)
 
         spinner: Spinner | None = Spinner()
         llm = _SpinnerLLMClient(llm, spinner)
