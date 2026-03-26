@@ -36,6 +36,7 @@ READINESS_SCORES = {"high": 90, "medium": 60, "low": 30}
 
 DEFAULT_CONFIDENCE_THRESHOLD = 80
 DEFAULT_MAX_ROUNDS = 10
+SAFETY_CAP = 50
 
 _ASSESSMENT_PROMPT = """\
 ## IdeaMemory — Canonical Decisions
@@ -95,14 +96,12 @@ def make_estimate_confidence_node(
     llm: LLMClient,
     *,
     threshold: int = DEFAULT_CONFIDENCE_THRESHOLD,
-    max_rounds: int = DEFAULT_MAX_ROUNDS,
 ) -> Callable[..., Any]:
     """Create the estimate_confidence node.
 
     Args:
         llm: LLM client for assessment generation.
         threshold: Confidence score to auto-proceed.
-        max_rounds: Hard cap on question rounds.
 
     Returns:
         Async node function.
@@ -112,8 +111,8 @@ def make_estimate_confidence_node(
         """Assess section readiness and route to questions or approaches."""
         deferred = list(state.get("deferred_sections", []))
 
-        # Hard cap: force proceed
-        if state.get("round_number", 0) >= max_rounds:
+        # Absolute safety cap: force proceed
+        if state.get("round_number", 0) >= SAFETY_CAP:
             return {"status": "proposing"}
 
         deferred_note = ""
@@ -154,6 +153,31 @@ def make_estimate_confidence_node(
                 "confidence_score": score,
                 "gaps": gaps,
                 "status": "proposing",
+                "stall_counter": 0,
+                "previous_confidence": float(score),
+            }
+
+        # Stall detection
+        prev = state.get("previous_confidence", 0.0)
+        counter = state.get("stall_counter", 0)
+        delta = score - prev
+
+        if delta < 0 or delta >= 2:
+            # Drop or significant gain → reset counter
+            counter = 0
+        else:
+            # Flat or tiny wobble → increment
+            counter += 1
+
+        if counter >= 3:
+            # Stall detected — skip interrupt, route to stall_exit node
+            return {
+                "section_readiness": section_readiness,
+                "confidence_score": score,
+                "gaps": gaps,
+                "status": "stalled",
+                "stall_counter": counter,
+                "previous_confidence": float(score),
             }
 
         # Interrupt for human decision
@@ -175,6 +199,8 @@ def make_estimate_confidence_node(
                 "confidence_score": score,
                 "gaps": gaps,
                 "status": "proposing",
+                "stall_counter": counter,
+                "previous_confidence": float(score),
             }
 
         if response_str.startswith("defer"):
@@ -193,6 +219,8 @@ def make_estimate_confidence_node(
                 "gaps": [g for g in gaps if g["section"] not in new_deferred],
                 "deferred_sections": new_deferred,
                 "status": new_status,
+                "stall_counter": counter,
+                "previous_confidence": float(new_score),
             }
 
         # Default: continue questioning
@@ -201,6 +229,8 @@ def make_estimate_confidence_node(
             "confidence_score": score,
             "gaps": gaps,
             "status": "questioning",
+            "stall_counter": counter,
+            "previous_confidence": float(score),
         }
 
     return estimate_confidence
