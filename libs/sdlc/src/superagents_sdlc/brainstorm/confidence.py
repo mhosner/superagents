@@ -104,6 +104,32 @@ def compute_confidence(sections: dict, deferred: list[str]) -> int:
     return total // len(active)
 
 
+def _build_section_summaries(
+    section_readiness: dict,
+    idea_memory: list[dict],
+) -> dict[str, str]:
+    """Build display summaries from IdeaMemory, not LLM output.
+
+    Args:
+        section_readiness: Section name to readiness dict.
+        idea_memory: Serialized IdeaMemory entries from state.
+
+    Returns:
+        Section name to summary text mapping.
+    """
+    summaries: dict[str, str] = {}
+    for section_key in section_readiness:
+        entries = [
+            e["text"] for e in idea_memory
+            if e.get("section") == section_key
+        ]
+        if entries:
+            summaries[section_key] = " | ".join(entries)
+        else:
+            summaries[section_key] = "No decision made yet."
+    return summaries
+
+
 def make_estimate_confidence_node(
     llm: LLMClient,
     *,

@@ -12,6 +12,7 @@ from superagents_sdlc.brainstorm.confidence import (
     READINESS_SCORES,
     SECTIONS,
     _ASSESSMENT_PROMPT,
+    _build_section_summaries,
     compute_confidence,
     make_estimate_confidence_node,
 )
@@ -85,6 +86,7 @@ def _make_state(**overrides):
         "idea_memory_counts": {"decision": 0, "rejection": 0},
         "stall_counter": 0,
         "previous_confidence": 0.0,
+        "section_summaries": {},
     }
     base.update(overrides)
     return base
@@ -339,3 +341,41 @@ def test_assessment_prompt_has_verbatim_constraint():
 def test_assessment_prompt_has_verification_instruction():
     """Assessment prompt must instruct LLM to verify summaries against IdeaMemory."""
     assert "verify each section summary" in _ASSESSMENT_PROMPT
+
+
+# -- _build_section_summaries tests --
+
+
+def test_build_section_summaries_from_entries():
+    """Summaries assembled from IdeaMemory entries matching section keys."""
+    readiness = {
+        "technical_constraints": {"readiness": "high"},
+        "requirements": {"readiness": "low"},
+    }
+    entries = [
+        {"id": "D1", "title": "Tech", "type": "decision",
+         "text": "Use PostgreSQL", "section": "technical_constraints"},
+    ]
+    result = _build_section_summaries(readiness, entries)
+    assert result["technical_constraints"] == "Use PostgreSQL"
+    assert result["requirements"] == "No decision made yet."
+
+
+def test_build_section_summaries_multiple_entries():
+    """Multiple entries for one section joined with ' | '."""
+    readiness = {"technical_constraints": {"readiness": "high"}}
+    entries = [
+        {"id": "D1", "title": "Tech", "type": "decision",
+         "text": "Use PostgreSQL", "section": "technical_constraints"},
+        {"id": "D2", "title": "Tech", "type": "decision",
+         "text": "Deploy on AWS", "section": "technical_constraints"},
+    ]
+    result = _build_section_summaries(readiness, entries)
+    assert result["technical_constraints"] == "Use PostgreSQL | Deploy on AWS"
+
+
+def test_build_section_summaries_no_entries():
+    """Section with no matching entries returns placeholder."""
+    readiness = {"scope_boundaries": {"readiness": "low"}}
+    result = _build_section_summaries(readiness, [])
+    assert result["scope_boundaries"] == "No decision made yet."

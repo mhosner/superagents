@@ -35,6 +35,7 @@ def _initial_state() -> dict:
         "idea_memory_counts": {"decision": 0, "rejection": 0},
         "stall_counter": 0,
         "previous_confidence": 0.0,
+        "section_summaries": {},
     }
 
 
