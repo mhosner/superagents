@@ -169,8 +169,8 @@ def test_extract_section_content_fallback_on_invalid_json():
     assert _extract_section_content(raw) == raw
 
 
-async def test_cli_resolves_numbered_answer_to_option_text():
-    """CLI resolves '2' to full option text before returning."""
+async def test_cli_returns_question_metadata_with_answer():
+    """CLI returns dict with resolved answer + question metadata."""
     payload = {
         "type": "questions",
         "questions": [
@@ -184,11 +184,14 @@ async def test_cli_resolves_numbered_answer_to_option_text():
     }
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="2"):
         result = await _handle_brainstorm_interrupt(payload, quiet=True)
-    assert result == ["Emit with circular flag"]
+    assert len(result) == 1
+    assert result[0]["answer"] == "Emit with circular flag"
+    assert result[0]["targets_section"] == "technical_constraints"
+    assert result[0]["question_text"] == "How to handle cycles?"
 
 
-async def test_cli_passes_freetext_answer_unchanged():
-    """Free-text answer (no options) passes through unchanged."""
+async def test_cli_freetext_answer_includes_metadata():
+    """Free-text answer includes metadata from the question."""
     payload = {
         "type": "questions",
         "questions": [
@@ -201,7 +204,8 @@ async def test_cli_passes_freetext_answer_unchanged():
     }
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="DevOps engineers"):
         result = await _handle_brainstorm_interrupt(payload, quiet=True)
-    assert result == ["DevOps engineers"]
+    assert result[0]["answer"] == "DevOps engineers"
+    assert result[0]["targets_section"] == "users_and_personas"
 
 
 async def test_stall_exit_handler_proceed():

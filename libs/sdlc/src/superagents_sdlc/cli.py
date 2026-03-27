@@ -353,18 +353,22 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
             response = await _async_input("> ")
             if response.strip().lower() in ("q", "quit"):
                 raise _BrainstormQuit
-            # Resolve numbered/letter answers to full option text before
-            # returning.  The generate_question node re-executes its LLM
-            # call on resume, which may reorder options.  Returning the
-            # resolved text instead of "2" makes the answer independent
-            # of option ordering.
+            # Return resolved answer + question metadata from the
+            # interrupt payload.  The generate_question node re-executes
+            # its LLM call on resume which may reorder options or target
+            # a different section.  Returning the full metadata makes
+            # the answer independent of the re-executed output.
             raw_opts = q.get("options")
             if raw_opts:
                 from superagents_sdlc.brainstorm.nodes import _clean_option, _resolve_answer  # noqa: PLC0415
 
                 cleaned = [_clean_option(o) for o in raw_opts]
                 response = _resolve_answer(response, cleaned)
-            answers.append(response)
+            answers.append({
+                "answer": response,
+                "targets_section": q.get("targets_section", ""),
+                "question_text": q.get("question", ""),
+            })
         return answers
 
     # Legacy single-question format

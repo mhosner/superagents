@@ -190,20 +190,30 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
             "gaps_remaining": len(gaps),
         })
 
-        # answers is a list of answer strings (one per question)
+        # answers is a list — each item is either a dict (with answer,
+        # targets_section, question_text from the CLI) or a plain string
+        # (backward compat / tests).
         if isinstance(answers, str):
             answers = [answers]
 
         updated = list(state["transcript"])
-        for question, answer in zip(questions, answers, strict=False):
-            raw_options = question.get("options")
-            cleaned = [_clean_option(o) for o in raw_options] if raw_options else None
-            resolved = _resolve_answer(answer, cleaned)
+        for entry in answers:
+            if isinstance(entry, dict):
+                # CLI returned structured metadata — use it directly
+                answer_text = entry["answer"]
+                section = entry.get("targets_section", "")
+                question_text = entry.get("question_text", "?")
+            else:
+                # Plain string (backward compat) — resolve against
+                # re-executed questions as fallback
+                answer_text = entry
+                section = ""
+                question_text = "?"
+
             updated.append({
-                "question": question.get("question", "?"),
-                "options": cleaned,
-                "answer": resolved,
-                "targets_section": question.get("targets_section", ""),
+                "question": question_text,
+                "answer": answer_text,
+                "targets_section": section,
             })
 
         # Update IdeaMemory with decisions

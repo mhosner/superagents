@@ -363,7 +363,7 @@ def test_clean_option_strips_letter_dot_prefix():
 
 
 async def test_transcript_stores_resolved_text():
-    """When user answers '2', transcript stores the full option text."""
+    """Structured CLI response stores resolved answer in transcript."""
     llm = StubLLMClient(responses={
         "## Gaps to address": json.dumps({
             "questions": [
@@ -373,15 +373,17 @@ async def test_transcript_stores_resolved_text():
     })
     node = make_generate_question_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value=["2"]):
+    with patch(_INTERRUPT_PATH, return_value=[
+        {"answer": "SQLite", "targets_section": "technical_constraints", "question_text": "Storage?"},
+    ]):
         result = await node(_make_state())
 
     assert result["transcript"][0]["answer"] == "SQLite"
-    assert result["transcript"][0]["options"] == ["JSON", "SQLite"]
+    assert result["transcript"][0]["targets_section"] == "technical_constraints"
 
 
 async def test_batch_questions_all_resolved():
-    """Multiple questions with mixed answer types all resolve correctly."""
+    """Multiple structured answers all stored correctly."""
     llm = StubLLMClient(responses={
         "## Gaps to address": json.dumps({
             "questions": [
@@ -393,7 +395,11 @@ async def test_batch_questions_all_resolved():
     })
     node = make_generate_question_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value=["1", "b", "free text"]):
+    with patch(_INTERRUPT_PATH, return_value=[
+        {"answer": "JSON", "targets_section": "technical_constraints", "question_text": "Storage?"},
+        {"answer": "Lambda", "targets_section": "technical_constraints", "question_text": "Deploy?"},
+        {"answer": "free text", "targets_section": "requirements", "question_text": "Custom notes?"},
+    ]):
         result = await node(_make_state())
 
     assert result["transcript"][0]["answer"] == "JSON"
@@ -653,7 +659,7 @@ async def test_question_answer_adds_to_idea_memory():
 
 
 async def test_decision_stores_section_key():
-    """IdeaMemory entries store the raw section key."""
+    """IdeaMemory entries store the raw section key from CLI metadata."""
     llm = StubLLMClient(responses={
         "## Gaps to address": json.dumps({
             "questions": [
@@ -664,7 +670,9 @@ async def test_decision_stores_section_key():
     })
     node = make_generate_question_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value=["PostgreSQL"]):
+    with patch(_INTERRUPT_PATH, return_value=[
+        {"answer": "PostgreSQL", "targets_section": "technical_constraints", "question_text": "Tech?"},
+    ]):
         result = await node(_make_state())
 
     assert result["idea_memory"][0]["section"] == "technical_constraints"
@@ -691,7 +699,7 @@ async def test_multiple_answers_sequential_ids():
 
 
 async def test_decision_title_uses_section_titles():
-    """Decision title comes from SECTION_TITLES mapping."""
+    """Decision title comes from SECTION_TITLES mapping via CLI metadata."""
     llm = StubLLMClient(responses={
         "## Gaps to address": json.dumps({
             "questions": [
@@ -702,10 +710,30 @@ async def test_decision_title_uses_section_titles():
     })
     node = make_generate_question_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value=["PostgreSQL"]):
+    with patch(_INTERRUPT_PATH, return_value=[
+        {"answer": "PostgreSQL", "targets_section": "technical_constraints", "question_text": "Tech?"},
+    ]):
         result = await node(_make_state())
 
     assert result["idea_memory"][0]["title"] == "Technical Constraints & Dependencies"
+
+
+async def test_backward_compat_string_answer():
+    """Plain string answer still works (section defaults to empty)."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Q?", "options": None, "targets_section": "requirements"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=["plain text"]):
+        result = await node(_make_state())
+
+    assert result["transcript"][0]["answer"] == "plain text"
+    assert result["idea_memory"][0]["section"] == ""
 
 
 def test_question_prompt_requests_single_question():
