@@ -169,6 +169,41 @@ def test_extract_section_content_fallback_on_invalid_json():
     assert _extract_section_content(raw) == raw
 
 
+async def test_cli_resolves_numbered_answer_to_option_text():
+    """CLI resolves '2' to full option text before returning."""
+    payload = {
+        "type": "questions",
+        "questions": [
+            {"question": "How to handle cycles?",
+             "options": ["Merge into super-slice", "Emit with circular flag",
+                         "Break weakest edge", "Halt with error"],
+             "targets_section": "technical_constraints"},
+        ],
+        "round": 1,
+        "confidence": 40,
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="2"):
+        result = await _handle_brainstorm_interrupt(payload, quiet=True)
+    assert result == ["Emit with circular flag"]
+
+
+async def test_cli_passes_freetext_answer_unchanged():
+    """Free-text answer (no options) passes through unchanged."""
+    payload = {
+        "type": "questions",
+        "questions": [
+            {"question": "Who are the users?",
+             "options": None,
+             "targets_section": "users_and_personas"},
+        ],
+        "round": 1,
+        "confidence": 40,
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="DevOps engineers"):
+        result = await _handle_brainstorm_interrupt(payload, quiet=True)
+    assert result == ["DevOps engineers"]
+
+
 async def test_stall_exit_handler_proceed():
     """stall_exit interrupt with 'proceed' returns 'proceed'."""
     payload = {
