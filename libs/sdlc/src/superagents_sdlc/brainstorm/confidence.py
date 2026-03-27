@@ -219,6 +219,7 @@ def make_estimate_confidence_node(
             "threshold": threshold,
             "round": state.get("round_number", 0),
             "sections": section_readiness,
+            "summaries": summaries,
             "gaps": gaps,
             "options": ["continue", "defer", "override"],
         })
