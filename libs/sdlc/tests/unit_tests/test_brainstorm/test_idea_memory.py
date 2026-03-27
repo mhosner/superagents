@@ -59,3 +59,26 @@ def test_to_state_and_from_state():
     assert restored.entries[0].id == "D1"
     assert restored.entries[1].id == "R1"
     assert restored.format_for_prompt() == mem.format_for_prompt()
+
+
+def test_memory_entry_has_section_field():
+    """MemoryEntry stores and round-trips the section key."""
+    mem = IdeaMemory(idea_title="Test")
+    mem.add_decision(title="Tech", text="Use Go", section="technical_constraints")
+
+    assert mem.entries[0].section == "technical_constraints"
+
+    # Round-trip
+    state = mem.to_state()
+    assert state[0]["section"] == "technical_constraints"
+
+    restored = IdeaMemory.from_state("Test", state, mem.counts)
+    assert restored.entries[0].section == "technical_constraints"
+
+
+def test_section_defaults_to_empty():
+    """Section defaults to empty string for backward compatibility."""
+    mem = IdeaMemory(idea_title="Test")
+    mem.add_decision(title="A", text="B")
+
+    assert mem.entries[0].section == ""

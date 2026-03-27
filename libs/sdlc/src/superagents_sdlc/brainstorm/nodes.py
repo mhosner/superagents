@@ -115,6 +115,7 @@ def make_explore_context_node() -> Callable[..., Any]:
             "idea_memory_counts": {"decision": 0, "rejection": 0},
             "stall_counter": 0,
             "previous_confidence": 0.0,
+            "section_summaries": {},
         }
 
     return explore_context
@@ -216,7 +217,7 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
             title = SECTION_TITLES.get(
                 section, section.replace("_", " ").title(),
             )
-            memory.add_decision(title=title, text=entry["answer"])
+            memory.add_decision(title=title, text=entry["answer"], section=section)
 
         return {
             "transcript": updated,

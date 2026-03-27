@@ -29,6 +29,7 @@ class BrainstormState(TypedDict):
         idea_memory_counts: Counts of memory entries by type.
         stall_counter: Consecutive questions with < 2pt confidence gain.
         previous_confidence: Confidence score from prior iteration.
+        section_summaries: Code-assembled summaries from IdeaMemory entries.
     """
 
     idea: str
@@ -51,3 +52,4 @@ class BrainstormState(TypedDict):
     idea_memory_counts: dict
     stall_counter: int
     previous_confidence: float
+    section_summaries: dict

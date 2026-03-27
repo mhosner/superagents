@@ -50,6 +50,7 @@ def _make_state(**overrides: object) -> dict:
         "idea_memory_counts": {"decision": 0, "rejection": 0},
         "stall_counter": 0,
         "previous_confidence": 0.0,
+        "section_summaries": {},
     }
     base.update(overrides)
     return base
@@ -62,7 +63,7 @@ def _raise_interrupt(value):
 def test_brainstorm_state_is_typeddict():
     state: BrainstormState = _make_state()  # type: ignore[assignment]
     assert state["status"] == "exploring"
-    assert len(state) == 20
+    assert len(state) == 21
 
 
 async def test_explore_context_initializes_state():
@@ -471,7 +472,7 @@ async def test_question_node_passes_cached_prefix():
         idea="Build search",
         product_context="Enterprise SaaS",
         codebase_context="Python backend",
-        section_readiness={"requirements": {"readiness": "low", "evidence": "missing"}},
+        section_readiness={"requirements": {"readiness": "low"}},
         gaps=[{"section": "requirements", "description": "No details"}],
     )
     with patch(_INTERRUPT_PATH, return_value=["My answer"]):
@@ -553,7 +554,7 @@ async def test_question_prompt_contains_idea_memory():
         idea_memory=[{"id": "D1", "title": "Tech", "type": "decision", "text": "Use Go"}],
         idea_memory_counts={"decision": 1, "rejection": 0},
         idea="Build API",
-        section_readiness={"requirements": {"readiness": "low", "evidence": "missing"}},
+        section_readiness={"requirements": {"readiness": "low"}},
         gaps=[{"section": "requirements", "description": "No details"}],
     )
     with patch(_INTERRUPT_PATH, return_value=["answer"]):
@@ -649,6 +650,24 @@ async def test_question_answer_adds_to_idea_memory():
     assert len(result["idea_memory"]) == 1
     assert result["idea_memory"][0]["id"] == "D1"
     assert result["idea_memory"][0]["text"] == "JSON"
+
+
+async def test_decision_stores_section_key():
+    """IdeaMemory entries store the raw section key."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Tech?", "options": None,
+                 "targets_section": "technical_constraints"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=["PostgreSQL"]):
+        result = await node(_make_state())
+
+    assert result["idea_memory"][0]["section"] == "technical_constraints"
 
 
 async def test_multiple_answers_sequential_ids():

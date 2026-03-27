@@ -19,12 +19,14 @@ class MemoryEntry:
         title: Human-readable section title.
         type: Entry type ("decision" or "rejection").
         text: Canonical text (1-3 sentences).
+        section: Section key for code-assembled summaries (e.g., "technical_constraints").
     """
 
     id: str
     title: str
     type: str
     text: str
+    section: str = ""
 
 
 @dataclass
@@ -46,34 +48,40 @@ class IdeaMemory:
         """Return current entry counts for state serialization."""
         return {"decision": self._decision_count, "rejection": self._rejection_count}
 
-    def add_decision(self, title: str, text: str) -> str:
+    def add_decision(self, title: str, text: str, *, section: str = "") -> str:
         """Add a decision entry.
 
         Args:
             title: Human-readable section title.
             text: Canonical decision text.
+            section: Section key for code-assembled summaries.
 
         Returns:
             Assigned entry ID (e.g., "D1").
         """
         self._decision_count += 1
         entry_id = f"D{self._decision_count}"
-        self.entries.append(MemoryEntry(id=entry_id, title=title, type="decision", text=text))
+        self.entries.append(
+            MemoryEntry(id=entry_id, title=title, type="decision", text=text, section=section)
+        )
         return entry_id
 
-    def add_rejection(self, title: str, text: str) -> str:
+    def add_rejection(self, title: str, text: str, *, section: str = "") -> str:
         """Add a rejection entry.
 
         Args:
             title: Human-readable section title.
             text: Canonical rejection text.
+            section: Section key for code-assembled summaries.
 
         Returns:
             Assigned entry ID (e.g., "R1").
         """
         self._rejection_count += 1
         entry_id = f"R{self._rejection_count}"
-        self.entries.append(MemoryEntry(id=entry_id, title=title, type="rejection", text=text))
+        self.entries.append(
+            MemoryEntry(id=entry_id, title=title, type="rejection", text=text, section=section)
+        )
         return entry_id
 
     def format_for_prompt(self) -> str:
@@ -113,7 +121,7 @@ class IdeaMemory:
             List of dicts, each with id, title, type, text keys.
         """
         return [
-            {"id": e.id, "title": e.title, "type": e.type, "text": e.text}
+            {"id": e.id, "title": e.title, "type": e.type, "text": e.text, "section": e.section}
             for e in self.entries
         ]
 
@@ -138,7 +146,13 @@ class IdeaMemory:
         mem._decision_count = counts.get("decision", 0)
         mem._rejection_count = counts.get("rejection", 0)
         mem.entries = [
-            MemoryEntry(id=e["id"], title=e["title"], type=e["type"], text=e["text"])
+            MemoryEntry(
+                id=e["id"],
+                title=e["title"],
+                type=e["type"],
+                text=e["text"],
+                section=e.get("section", ""),
+            )
             for e in entries
         ]
         return mem

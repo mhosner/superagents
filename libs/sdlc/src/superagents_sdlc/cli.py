@@ -376,12 +376,13 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
             confidence = payload.get("confidence", 0)
             threshold = payload.get("threshold", 80)
             print(f"\nConfidence Assessment: {confidence}% (threshold: {threshold}%)")  # noqa: T201
+            summaries = payload.get("summaries", {})
             for section, info in payload.get("sections", {}).items():
                 readiness = info.get("readiness", "?")
-                evidence = info.get("evidence", "")
+                summary = summaries.get(section, "")
                 markers = {"high": "✓", "medium": "~", "low": "✗"}
                 marker = markers.get(readiness, "?")
-                print(f"  {marker} {section}: {readiness.upper()} — {evidence}")  # noqa: T201
+                print(f"  {marker} {section}: {readiness.upper()} — {summary}")  # noqa: T201
             if payload.get("gaps"):
                 print("\nGaps:")  # noqa: T201
                 for gap in payload["gaps"]:
