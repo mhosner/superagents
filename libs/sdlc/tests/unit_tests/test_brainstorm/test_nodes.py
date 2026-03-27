@@ -651,6 +651,24 @@ async def test_question_answer_adds_to_idea_memory():
     assert result["idea_memory"][0]["text"] == "JSON"
 
 
+async def test_decision_stores_section_key():
+    """IdeaMemory entries store the raw section key."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Tech?", "options": None,
+                 "targets_section": "technical_constraints"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=["PostgreSQL"]):
+        result = await node(_make_state())
+
+    assert result["idea_memory"][0]["section"] == "technical_constraints"
+
+
 async def test_multiple_answers_sequential_ids():
     """Multiple answers produce D1, D2, D3."""
     llm = StubLLMClient(responses={

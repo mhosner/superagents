@@ -216,7 +216,7 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
             title = SECTION_TITLES.get(
                 section, section.replace("_", " ").title(),
             )
-            memory.add_decision(title=title, text=entry["answer"])
+            memory.add_decision(title=title, text=entry["answer"], section=section)
 
         return {
             "transcript": updated,
