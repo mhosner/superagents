@@ -472,7 +472,7 @@ async def test_question_node_passes_cached_prefix():
         idea="Build search",
         product_context="Enterprise SaaS",
         codebase_context="Python backend",
-        section_readiness={"requirements": {"readiness": "low", "evidence": "missing"}},
+        section_readiness={"requirements": {"readiness": "low"}},
         gaps=[{"section": "requirements", "description": "No details"}],
     )
     with patch(_INTERRUPT_PATH, return_value=["My answer"]):
@@ -554,7 +554,7 @@ async def test_question_prompt_contains_idea_memory():
         idea_memory=[{"id": "D1", "title": "Tech", "type": "decision", "text": "Use Go"}],
         idea_memory_counts={"decision": 1, "rejection": 0},
         idea="Build API",
-        section_readiness={"requirements": {"readiness": "low", "evidence": "missing"}},
+        section_readiness={"requirements": {"readiness": "low"}},
         gaps=[{"section": "requirements", "description": "No details"}],
     )
     with patch(_INTERRUPT_PATH, return_value=["answer"]):

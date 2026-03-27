@@ -41,27 +41,25 @@ def _initial_state() -> dict:
 
 def _all_high_assessment():
     return json.dumps({
-        "sections": {s: {"readiness": "high", "evidence": "clear"} for s in SECTIONS},
+        "sections": {s: {"readiness": "high"} for s in SECTIONS},
         "gaps": [],
-        "recommendation": "ready",
     })
 
 
 def _low_assessment():
     return json.dumps({
         "sections": {
-            "problem_statement": {"readiness": "high", "evidence": "clear"},
-            "users_and_personas": {"readiness": "high", "evidence": "clear"},
-            "requirements": {"readiness": "medium", "evidence": "partial"},
-            "acceptance_criteria": {"readiness": "low", "evidence": "missing"},
-            "scope_boundaries": {"readiness": "medium", "evidence": "vague"},
-            "technical_constraints": {"readiness": "low", "evidence": "none"},
+            "problem_statement": {"readiness": "high"},
+            "users_and_personas": {"readiness": "high"},
+            "requirements": {"readiness": "medium"},
+            "acceptance_criteria": {"readiness": "low"},
+            "scope_boundaries": {"readiness": "medium"},
+            "technical_constraints": {"readiness": "low"},
         },
         "gaps": [
             {"section": "acceptance_criteria", "description": "No error paths"},
             {"section": "technical_constraints", "description": "No storage discussion"},
         ],
-        "recommendation": "continue",
     })
 
 

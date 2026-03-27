@@ -44,14 +44,6 @@ The following decisions are FINAL. They were recorded exactly as the user \
 stated them. You MUST NOT contradict, reinterpret, narrow, extend, or \
 synthesize beyond what is written here.
 
-CRITICAL: Your section summaries must ONLY reference decisions that appear \
-verbatim in IdeaMemory above. Do not infer implementation details, numeric \
-values, file paths, formulas, or architectural choices that the user did \
-not explicitly state. If IdeaMemory says "weighted separately" you must \
-NOT invent a weighting scheme. If IdeaMemory says "separate file" you must \
-NOT specify which existing file to write to. Summaries must use the same \
-language as IdeaMemory — paraphrase for brevity, never embellish.
-
 {idea_memory}
 
 Rate each section's readiness based ONLY on what IdeaMemory contains. \
@@ -73,17 +65,13 @@ Sections to rate:
 
 {deferred_note}
 
-Before returning your response, verify each section summary against \
-IdeaMemory. For every specific detail in your summary (file names, \
-numbers, formulas, paths, formats), confirm it appears in IdeaMemory. \
-If it doesn't, remove it.
+For gap descriptions: describe what is MISSING, not what was decided. \
+Do not infer implementation details, numeric values, file paths, \
+formulas, or architectural choices that the user did not explicitly state.
 
 Return ONLY valid JSON:
-For the "evidence" field: quote ONLY from IdeaMemory above. \
-If no entry addresses this section, write "No decision made yet."
-{{"sections": {{"problem_statement": {{"readiness": "high", "evidence": "..."}}, ...}}, \
-"gaps": [{{"section": "...", "description": "..."}}], \
-"recommendation": "continue" | "ready"}}
+{{"sections": {{"problem_statement": {{"readiness": "high"}}, ...}}, \
+"gaps": [{{"section": "...", "description": "what is missing"}}]}}
 """
 
 
@@ -91,7 +79,7 @@ def compute_confidence(sections: dict, deferred: list[str]) -> int:
     """Compute confidence score from section readiness ratings.
 
     Args:
-        sections: Map of section name to {readiness, evidence} dict.
+        sections: Map of section name to {readiness} dict.
         deferred: Section names excluded from scoring.
 
     Returns:
@@ -151,7 +139,7 @@ def make_estimate_confidence_node(
 
         # Absolute safety cap: force proceed
         if state.get("round_number", 0) >= SAFETY_CAP:
-            return {"status": "proposing"}
+            return {"status": "proposing", "section_summaries": {}}
 
         deferred_note = ""
         if deferred:
@@ -183,6 +171,10 @@ def make_estimate_confidence_node(
         section_readiness = parsed["sections"]
         gaps = parsed.get("gaps", [])
         score = compute_confidence(section_readiness, deferred)
+        summaries = _build_section_summaries(
+            section_readiness,
+            list(state.get("idea_memory", [])),
+        )
 
         # Auto-proceed if above threshold
         if score >= threshold:
@@ -193,6 +185,7 @@ def make_estimate_confidence_node(
                 "status": "proposing",
                 "stall_counter": 0,
                 "previous_confidence": float(score),
+                "section_summaries": summaries,
             }
 
         # Stall detection
@@ -216,6 +209,7 @@ def make_estimate_confidence_node(
                 "status": "stalled",
                 "stall_counter": counter,
                 "previous_confidence": float(score),
+                "section_summaries": summaries,
             }
 
         # Interrupt for human decision
@@ -239,6 +233,7 @@ def make_estimate_confidence_node(
                 "status": "proposing",
                 "stall_counter": counter,
                 "previous_confidence": float(score),
+                "section_summaries": summaries,
             }
 
         if response_str.startswith("defer"):
@@ -259,6 +254,7 @@ def make_estimate_confidence_node(
                 "status": new_status,
                 "stall_counter": counter,
                 "previous_confidence": float(new_score),
+                "section_summaries": summaries,
             }
 
         # Default: continue questioning
@@ -269,6 +265,7 @@ def make_estimate_confidence_node(
             "status": "questioning",
             "stall_counter": counter,
             "previous_confidence": float(score),
+            "section_summaries": summaries,
         }
 
     return estimate_confidence

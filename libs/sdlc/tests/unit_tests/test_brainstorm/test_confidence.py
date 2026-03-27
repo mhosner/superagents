@@ -24,13 +24,18 @@ _INTERRUPT_PATH = "superagents_sdlc.brainstorm.confidence.interrupt"
 # -- compute_confidence tests --
 
 
+def test_assessment_prompt_no_evidence_field():
+    """Assessment prompt schema must not ask for 'evidence' field."""
+    assert '"evidence"' not in _ASSESSMENT_PROMPT
+
+
 def test_compute_all_high():
-    sections = {s: {"readiness": "high", "evidence": "good"} for s in SECTIONS}
+    sections = {s: {"readiness": "high"} for s in SECTIONS}
     assert compute_confidence(sections, []) == 90
 
 
 def test_compute_all_low():
-    sections = {s: {"readiness": "low", "evidence": "missing"} for s in SECTIONS}
+    sections = {s: {"readiness": "low"} for s in SECTIONS}
     assert compute_confidence(sections, []) == 30
 
 
@@ -38,16 +43,13 @@ def test_compute_mixed():
     """3 high (90*3=270) + 3 low (30*3=90) = 360 / 6 = 60."""
     sections = {}
     for i, s in enumerate(SECTIONS):
-        sections[s] = {
-            "readiness": "high" if i < 3 else "low",
-            "evidence": "test",
-        }
+        sections[s] = {"readiness": "high" if i < 3 else "low"}
     assert compute_confidence(sections, []) == 60
 
 
 def test_compute_with_deferred():
     """Deferred sections excluded. 2 high out of 4 active, 2 deferred."""
-    sections = {s: {"readiness": "high", "evidence": "ok"} for s in SECTIONS}
+    sections = {s: {"readiness": "high"} for s in SECTIONS}
     sections["technical_constraints"]["readiness"] = "low"
     sections["scope_boundaries"]["readiness"] = "low"
     deferred = ["technical_constraints", "scope_boundaries"]
@@ -57,7 +59,7 @@ def test_compute_with_deferred():
 
 def test_compute_all_deferred():
     """All sections deferred returns 100."""
-    sections = {s: {"readiness": "low", "evidence": "x"} for s in SECTIONS}
+    sections = {s: {"readiness": "low"} for s in SECTIONS}
     assert compute_confidence(sections, list(SECTIONS)) == 100
 
 
@@ -94,27 +96,25 @@ def _make_state(**overrides):
 
 def _high_assessment():
     return json.dumps({
-        "sections": {s: {"readiness": "high", "evidence": "clear"} for s in SECTIONS},
+        "sections": {s: {"readiness": "high"} for s in SECTIONS},
         "gaps": [],
-        "recommendation": "ready",
     })
 
 
 def _low_assessment():
     return json.dumps({
         "sections": {
-            "problem_statement": {"readiness": "high", "evidence": "clear"},
-            "users_and_personas": {"readiness": "high", "evidence": "clear"},
-            "requirements": {"readiness": "medium", "evidence": "partial"},
-            "acceptance_criteria": {"readiness": "low", "evidence": "missing"},
-            "scope_boundaries": {"readiness": "medium", "evidence": "vague"},
-            "technical_constraints": {"readiness": "low", "evidence": "no discussion"},
+            "problem_statement": {"readiness": "high"},
+            "users_and_personas": {"readiness": "high"},
+            "requirements": {"readiness": "medium"},
+            "acceptance_criteria": {"readiness": "low"},
+            "scope_boundaries": {"readiness": "medium"},
+            "technical_constraints": {"readiness": "low"},
         },
         "gaps": [
             {"section": "acceptance_criteria", "description": "No error paths"},
             {"section": "technical_constraints", "description": "No storage discussion"},
         ],
-        "recommendation": "continue",
     })
 
 
@@ -126,6 +126,7 @@ async def test_estimate_all_high_scores_above_threshold():
     assert result["confidence_score"] == 90
     assert result["status"] == "proposing"
     assert result["gaps"] == []
+    assert "section_summaries" in result
 
 
 async def test_estimate_mixed_scores_below_threshold():
@@ -331,16 +332,6 @@ async def test_low_confidence_no_stall_keeps_questioning():
 
 
 # -- Anti-fabrication prompt constraints --
-
-
-def test_assessment_prompt_has_verbatim_constraint():
-    """Assessment prompt must instruct LLM to only reference IdeaMemory verbatim."""
-    assert "ONLY reference decisions" in _ASSESSMENT_PROMPT
-
-
-def test_assessment_prompt_has_verification_instruction():
-    """Assessment prompt must instruct LLM to verify summaries against IdeaMemory."""
-    assert "verify each section summary" in _ASSESSMENT_PROMPT
 
 
 # -- _build_section_summaries tests --
