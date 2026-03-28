@@ -134,13 +134,77 @@ def make_estimate_confidence_node(
     """
 
     async def estimate_confidence(state: BrainstormState) -> dict[str, Any]:
-        """Assess section readiness and route to questions or approaches."""
+        """Assess section readiness and route to questions or approaches.
+
+        Uses a two-pass pattern to avoid double LLM execution on
+        LangGraph interrupt/resume.  Pass 1 calls the LLM, caches
+        the result, and returns with ``status="awaiting_input"``
+        (no interrupt).  The graph routes back to this node.
+        Pass 2 reads the cache, calls ``interrupt()`` for HITL,
+        and handles the user's response.
+        """
         deferred = list(state.get("deferred_sections", []))
 
         # Absolute safety cap: force proceed
         if state.get("round_number", 0) >= SAFETY_CAP:
-            return {"status": "proposing", "section_summaries": {}}
+            return {"status": "proposing", "section_summaries": {}, "cached_assessment": {}}
 
+        # --- Pass 2: cached assessment exists → interrupt for HITL ---
+        cached = state.get("cached_assessment") or {}
+        if cached:
+            section_readiness = cached["section_readiness"]
+            score = cached["confidence_score"]
+            gaps = cached["gaps"]
+            summaries = cached["section_summaries"]
+            counter = cached["stall_counter"]
+
+            response = interrupt({
+                "type": "confidence_assessment",
+                "confidence": score,
+                "threshold": threshold,
+                "round": state.get("round_number", 0),
+                "sections": section_readiness,
+                "summaries": summaries,
+                "gaps": gaps,
+                "options": ["continue", "defer", "override"],
+            })
+
+            response_str = str(response).strip().lower()
+
+            base = {
+                "section_readiness": section_readiness,
+                "confidence_score": score,
+                "gaps": gaps,
+                "stall_counter": counter,
+                "previous_confidence": float(score),
+                "section_summaries": summaries,
+                "cached_assessment": {},
+            }
+
+            if response_str == "override":
+                return {**base, "status": "proposing"}
+
+            if response_str.startswith("defer"):
+                parts = response_str.split(maxsplit=1)
+                new_deferred = deferred
+                if len(parts) > 1:
+                    names = [s.strip() for s in parts[1].split(",") if s.strip()]
+                    new_deferred = list(set(deferred + names))
+                new_score = compute_confidence(section_readiness, new_deferred)
+                new_status = "proposing" if new_score >= threshold else "questioning"
+                return {
+                    **base,
+                    "confidence_score": new_score,
+                    "gaps": [g for g in gaps if g["section"] not in new_deferred],
+                    "deferred_sections": new_deferred,
+                    "status": new_status,
+                    "previous_confidence": float(new_score),
+                }
+
+            # Default: continue questioning
+            return {**base, "status": "questioning"}
+
+        # --- Pass 1: no cache → call LLM, compute, cache result ---
         deferred_note = ""
         if deferred:
             deferred_note = (
@@ -176,7 +240,7 @@ def make_estimate_confidence_node(
             list(state.get("idea_memory", [])),
         )
 
-        # Auto-proceed if above threshold
+        # Auto-proceed if above threshold — no interrupt needed
         if score >= threshold:
             return {
                 "section_readiness": section_readiness,
@@ -186,6 +250,7 @@ def make_estimate_confidence_node(
                 "stall_counter": 0,
                 "previous_confidence": float(score),
                 "section_summaries": summaries,
+                "cached_assessment": {},
             }
 
         # Stall detection
@@ -194,14 +259,12 @@ def make_estimate_confidence_node(
         delta = score - prev
 
         if delta < 0 or delta >= 2:
-            # Drop or significant gain → reset counter
             counter = 0
         else:
-            # Flat or tiny wobble → increment
             counter += 1
 
         if counter >= 3:
-            # Stall detected — skip interrupt, route to stall_exit node
+            # Stall detected — route to stall_exit, no interrupt
             return {
                 "section_readiness": section_readiness,
                 "confidence_score": score,
@@ -210,63 +273,25 @@ def make_estimate_confidence_node(
                 "stall_counter": counter,
                 "previous_confidence": float(score),
                 "section_summaries": summaries,
+                "cached_assessment": {},
             }
 
-        # Interrupt for human decision
-        response = interrupt({
-            "type": "confidence_assessment",
-            "confidence": score,
-            "threshold": threshold,
-            "round": state.get("round_number", 0),
-            "sections": section_readiness,
-            "summaries": summaries,
-            "gaps": gaps,
-            "options": ["continue", "defer", "override"],
-        })
-
-        response_str = str(response).strip().lower()
-
-        if response_str == "override":
-            return {
-                "section_readiness": section_readiness,
-                "confidence_score": score,
-                "gaps": gaps,
-                "status": "proposing",
-                "stall_counter": counter,
-                "previous_confidence": float(score),
-                "section_summaries": summaries,
-            }
-
-        if response_str.startswith("defer"):
-            # Parse "defer section1,section2"
-            parts = response_str.split(maxsplit=1)
-            new_deferred = deferred
-            if len(parts) > 1:
-                names = [s.strip() for s in parts[1].split(",") if s.strip()]
-                new_deferred = list(set(deferred + names))
-            # Recalculate with new deferrals
-            new_score = compute_confidence(section_readiness, new_deferred)
-            new_status = "proposing" if new_score >= threshold else "questioning"
-            return {
-                "section_readiness": section_readiness,
-                "confidence_score": new_score,
-                "gaps": [g for g in gaps if g["section"] not in new_deferred],
-                "deferred_sections": new_deferred,
-                "status": new_status,
-                "stall_counter": counter,
-                "previous_confidence": float(new_score),
-                "section_summaries": summaries,
-            }
-
-        # Default: continue questioning
+        # Below threshold, no stall — cache and route back for HITL
         return {
             "section_readiness": section_readiness,
             "confidence_score": score,
             "gaps": gaps,
-            "status": "questioning",
+            "status": "awaiting_input",
             "stall_counter": counter,
             "previous_confidence": float(score),
             "section_summaries": summaries,
+            "cached_assessment": {
+                "section_readiness": section_readiness,
+                "confidence_score": score,
+                "gaps": gaps,
+                "section_summaries": summaries,
+                "stall_counter": counter,
+            },
         }
 
     return estimate_confidence

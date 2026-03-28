@@ -89,6 +89,7 @@ def _make_state(**overrides):
         "stall_counter": 0,
         "previous_confidence": 0.0,
         "section_summaries": {},
+        "cached_assessment": {},
     }
     base.update(overrides)
     return base
@@ -129,38 +130,68 @@ async def test_estimate_all_high_scores_above_threshold():
     assert "section_summaries" in result
 
 
-async def test_estimate_mixed_scores_below_threshold():
+async def test_estimate_mixed_below_threshold_caches():
+    """Below-threshold assessment returns awaiting_input with cached data."""
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
-    def _raise_interrupt(value):
-        raise GraphInterrupt(value)
+    # Pass 1: LLM called, result cached, no interrupt
+    result = await node(_make_state())
 
-    with (
-        patch(_INTERRUPT_PATH, side_effect=_raise_interrupt),
-        pytest.raises(GraphInterrupt),
-    ):
-        await node(_make_state())
+    assert result["status"] == "awaiting_input"
+    assert result["cached_assessment"] != {}
+    assert result["cached_assessment"]["confidence_score"] == 60
+    assert len(llm.calls) == 1
 
 
-async def test_estimate_mixed_on_resume_continue():
+async def test_estimate_cached_skips_llm():
+    """When cached_assessment is populated, LLM is not called."""
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
+
+    cached = {
+        "section_readiness": {s: {"readiness": "low"} for s in SECTIONS},
+        "confidence_score": 30,
+        "gaps": [{"section": "requirements", "description": "missing"}],
+        "section_summaries": {"requirements": "No decision made yet."},
+        "stall_counter": 0,
+    }
 
     with patch(_INTERRUPT_PATH, return_value="continue"):
-        result = await node(_make_state())
+        result = await node(_make_state(cached_assessment=cached))
+
+    assert len(llm.calls) == 0  # LLM not called
+    assert result["status"] == "questioning"
+    assert result["cached_assessment"] == {}  # cache cleared
+
+
+async def test_estimate_resume_continue():
+    """Resume with 'continue' from cached assessment."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    # Pass 1: cache
+    pass1 = await node(_make_state())
+    # Pass 2: resume with cached state
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(**pass1))
 
     assert result["status"] == "questioning"
     assert len(result["gaps"]) == 2
     assert result["confidence_score"] < 80
+    assert result["cached_assessment"] == {}
 
 
 async def test_estimate_with_deferred_sections():
+    """Defer sections from cached assessment."""
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
+    # Pass 1: cache
+    pass1 = await node(_make_state())
+    # Pass 2: defer
     with patch(_INTERRUPT_PATH, return_value="defer technical_constraints,acceptance_criteria"):
-        result = await node(_make_state())
+        result = await node(_make_state(**pass1))
 
     assert "technical_constraints" in result["deferred_sections"]
     assert "acceptance_criteria" in result["deferred_sections"]
@@ -169,53 +200,49 @@ async def test_estimate_with_deferred_sections():
 
 
 async def test_stall_counter_resets_on_significant_gain():
-    """Confidence gain >= 2 resets stall_counter to 0."""
+    """Confidence gain >= 2 returns awaiting_input with reset counter."""
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value="continue"):
-        result = await node(_make_state(
-            previous_confidence=50.0,
-            stall_counter=2,
-        ))
+    # Score 60, prev 50 → delta 10 → reset counter → awaiting_input
+    result = await node(_make_state(
+        previous_confidence=50.0,
+        stall_counter=2,
+    ))
 
-    # Low assessment gives score 60: (90+90+60+30+60+30)/6=60
-    # Delta = 60 - 50 = 10, >= 2 → reset
     assert result["stall_counter"] == 0
     assert result["previous_confidence"] == float(result["confidence_score"])
-    assert result["status"] == "questioning"
+    assert result["status"] == "awaiting_input"
 
 
 async def test_stall_counter_resets_on_confidence_drop():
-    """Confidence drop resets stall_counter (drop means new info)."""
+    """Confidence drop resets stall_counter."""
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value="continue"):
-        result = await node(_make_state(
-            previous_confidence=70.0,
-            stall_counter=2,
-        ))
+    # Score = 60, prev 70 → delta -10 → reset counter
+    result = await node(_make_state(
+        previous_confidence=70.0,
+        stall_counter=2,
+    ))
 
-    # Score = 60, delta = 60 - 70 = -10, drop → reset
     assert result["stall_counter"] == 0
-    assert result["status"] == "questioning"
+    assert result["status"] == "awaiting_input"
 
 
 async def test_stall_counter_increments_on_flat_confidence():
-    """Confidence change < 2 (flat/wobble) increments stall_counter."""
+    """Confidence change < 2 increments stall_counter."""
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value="continue"):
-        result = await node(_make_state(
-            previous_confidence=60.0,
-            stall_counter=0,
-        ))
+    # Score = 60, prev 60 → delta 0 → increment
+    result = await node(_make_state(
+        previous_confidence=60.0,
+        stall_counter=0,
+    ))
 
-    # Score = 60, delta = 0, < 2 → increment
     assert result["stall_counter"] == 1
-    assert result["status"] == "questioning"
+    assert result["status"] == "awaiting_input"
 
 
 async def test_stall_counter_triggers_stall_exit_at_three():
@@ -239,15 +266,14 @@ async def test_stall_check_uses_first_round_correctly():
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value="continue"):
-        result = await node(_make_state(
-            previous_confidence=0.0,
-            stall_counter=0,
-        ))
+    result = await node(_make_state(
+        previous_confidence=0.0,
+        stall_counter=0,
+    ))
 
     # Score = 60, delta = 60 - 0 = 60, >= 2 → reset
     assert result["stall_counter"] == 0
-    assert result["status"] == "questioning"
+    assert result["status"] == "awaiting_input"
 
 
 async def test_safety_cap_forces_proceed():
@@ -264,8 +290,11 @@ async def test_estimate_override_forces_proceed():
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
+    # Pass 1: cache
+    pass1 = await node(_make_state())
+    # Pass 2: override from cache
     with patch(_INTERRUPT_PATH, return_value="override"):
-        result = await node(_make_state())
+        result = await node(_make_state(**pass1))
 
     assert result["status"] == "proposing"
 
@@ -314,20 +343,20 @@ async def test_confidence_node_passes_cached_prefix():
     assert "Python FastAPI backend" not in prompt
 
 
-async def test_low_confidence_no_stall_keeps_questioning():
-    """B-08 verify: confidence < threshold + no stall = keeps questioning."""
+async def test_low_confidence_no_stall_keeps_awaiting():
+    """B-08 verify: confidence < threshold + no stall = awaiting_input (then questioning)."""
     llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
     node = make_estimate_confidence_node(llm)
 
-    with patch(_INTERRUPT_PATH, return_value="continue"):
-        result = await node(_make_state(
-            previous_confidence=30.0,
-            stall_counter=0,
-        ))
+    # Pass 1: below threshold, no stall → caches
+    result = await node(_make_state(
+        previous_confidence=30.0,
+        stall_counter=0,
+    ))
 
-    # Score 60 > prev 30 → delta 30 → reset counter → questioning
+    # Score 60 > prev 30 → delta 30 → reset counter → awaiting_input
     assert result["confidence_score"] < 80
-    assert result["status"] == "questioning"
+    assert result["status"] == "awaiting_input"
     assert result["stall_counter"] == 0
 
 

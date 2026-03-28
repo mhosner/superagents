@@ -36,6 +36,7 @@ def _initial_state() -> dict:
         "stall_counter": 0,
         "previous_confidence": 0.0,
         "section_summaries": {},
+        "cached_assessment": {},
     }
 
 

@@ -82,7 +82,9 @@ def build_brainstorm_graph(
 
     # Conditional: after confidence estimation
     def route_after_confidence(state: BrainstormState) -> str:
-        """Route to questions, stall exit, or approaches."""
+        """Route to questions, stall exit, HITL, or approaches."""
+        if state["status"] == "awaiting_input":
+            return "estimate_confidence"
         if state["status"] == "stalled":
             return "stall_exit"
         if state["status"] == "questioning":
@@ -92,7 +94,7 @@ def build_brainstorm_graph(
     builder.add_conditional_edges(
         "estimate_confidence",
         route_after_confidence,
-        ["generate_question", "stall_exit", "propose_approaches"],
+        ["estimate_confidence", "generate_question", "stall_exit", "propose_approaches"],
     )
 
     # Conditional: after design section
