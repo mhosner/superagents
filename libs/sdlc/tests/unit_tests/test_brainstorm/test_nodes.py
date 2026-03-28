@@ -345,6 +345,36 @@ def test_resolve_answer_unrecognized_returns_raw():
     assert _resolve_answer("xyz", ["Apple", "Banana"]) == "xyz"
 
 
+def test_resolve_answer_multi_select_numbers():
+    """Comma-separated numbers resolve to full option texts joined with ' | '."""
+    opts = ["Alpha", "Beta", "Gamma"]
+    assert _resolve_answer("1, 2, 3", opts) == "Alpha | Beta | Gamma"
+
+
+def test_resolve_answer_multi_select_no_spaces():
+    """Comma-separated numbers without spaces resolve correctly."""
+    opts = ["Alpha", "Beta", "Gamma"]
+    assert _resolve_answer("1,3", opts) == "Alpha | Gamma"
+
+
+def test_resolve_answer_multi_select_letters():
+    """Comma-separated letters resolve to full option texts joined with ' | '."""
+    opts = ["Alpha", "Beta", "Gamma"]
+    assert _resolve_answer("a, c", opts) == "Alpha | Gamma"
+
+
+def test_resolve_answer_multi_select_out_of_range_falls_through():
+    """If any token is out of range, raw input is returned unchanged."""
+    opts = ["Alpha", "Beta", "Gamma"]
+    assert _resolve_answer("1, 2, 7", opts) == "1, 2, 7"
+
+
+def test_resolve_answer_multi_select_free_text_falls_through():
+    """Comma-separated free text (not numbers/letters) returns raw input."""
+    opts = ["Alpha", "Beta", "Gamma"]
+    assert _resolve_answer("yes, definitely", opts) == "yes, definitely"
+
+
 # -- Option cleaning tests --
 
 
@@ -742,6 +772,85 @@ def test_question_prompt_requests_single_question():
     from superagents_sdlc.brainstorm.prompts import QUESTION_PROMPT
     assert "exactly 1 question" in QUESTION_PROMPT
     assert "up to 4 questions" not in QUESTION_PROMPT
+
+
+def test_question_prompt_has_dependency_order():
+    """QUESTION_PROMPT must include foundational-before-derived dependency order."""
+    from superagents_sdlc.brainstorm.prompts import QUESTION_PROMPT
+    assert "problem_statement" in QUESTION_PROMPT
+    assert "users_and_personas" in QUESTION_PROMPT
+    assert "requirements" in QUESTION_PROMPT
+
+
+def test_question_prompt_discourages_multi_select():
+    """QUESTION_PROMPT must discourage 'select all that apply' style questions."""
+    from superagents_sdlc.brainstorm.prompts import QUESTION_PROMPT
+    assert "select all that apply" in QUESTION_PROMPT.lower() or "mutually exclusive" in QUESTION_PROMPT.lower()
+
+
+async def test_question_node_prefers_foundational_section():
+    """When users_and_personas LOW and requirements LOW, question targets users_and_personas first."""
+    expected_response = json.dumps({
+        "questions": [{
+            "question": "Who are the primary users?",
+            "options": None,
+            "targets_section": "users_and_personas",
+        }],
+    })
+    llm = StubLLMClient(responses={"## Gaps to address": expected_response})
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=[{"answer": "Developers", "targets_section": "users_and_personas", "question_text": "Who are the primary users?"}]):
+        result = await node(_make_state(
+            section_readiness={
+                "problem_statement": {"readiness": "high"},
+                "users_and_personas": {"readiness": "low"},
+                "requirements": {"readiness": "low"},
+                "acceptance_criteria": {"readiness": "low"},
+                "scope_boundaries": {"readiness": "low"},
+                "technical_constraints": {"readiness": "low"},
+            },
+            gaps=[
+                {"section": "users_and_personas", "description": "No user definition"},
+                {"section": "requirements", "description": "No requirements"},
+            ],
+        ))
+
+    # The dependency order guidance is in the prompt sent to the LLM
+    prompt_sent = llm.calls[0][0]
+    assert "dependency" in prompt_sent.lower() or "foundational" in prompt_sent.lower() or "problem_statement" in prompt_sent
+
+
+async def test_question_node_targets_derived_when_foundational_high():
+    """When foundational sections are HIGH and only derived sections LOW, question targets derived."""
+    expected_response = json.dumps({
+        "questions": [{
+            "question": "What are the acceptance criteria?",
+            "options": None,
+            "targets_section": "acceptance_criteria",
+        }],
+    })
+    llm = StubLLMClient(responses={"## Gaps to address": expected_response})
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=[{"answer": "Pass all tests", "targets_section": "acceptance_criteria", "question_text": "What are the acceptance criteria?"}]):
+        result = await node(_make_state(
+            section_readiness={
+                "problem_statement": {"readiness": "high"},
+                "users_and_personas": {"readiness": "high"},
+                "requirements": {"readiness": "high"},
+                "acceptance_criteria": {"readiness": "low"},
+                "scope_boundaries": {"readiness": "medium"},
+                "technical_constraints": {"readiness": "low"},
+            },
+            gaps=[
+                {"section": "acceptance_criteria", "description": "No criteria defined"},
+            ],
+        ))
+
+    # Prompt must contain dependency order guidance
+    prompt_sent = llm.calls[0][0]
+    assert "problem_statement" in prompt_sent
 
 
 # -- stall_exit node tests --

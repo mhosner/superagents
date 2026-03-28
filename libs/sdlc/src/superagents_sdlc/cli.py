@@ -349,7 +349,7 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
 
                     for j, opt in enumerate(q["options"], 1):
                         print(f"    {j}. {_clean_option(opt)}")  # noqa: T201
-                print("  (type 'q' to quit)")  # noqa: T201
+                print("  (type a number, your own answer, or 'q' to quit)")  # noqa: T201
             response = await _async_input("> ")
             if response.strip().lower() in ("q", "quit"):
                 raise _BrainstormQuit

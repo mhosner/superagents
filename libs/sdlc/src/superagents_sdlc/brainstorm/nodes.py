@@ -54,36 +54,63 @@ def _clean_option(text: str) -> str:
     return re.sub(r"^[a-z][).]\s*", "", text)
 
 
-def _resolve_answer(response: str, options: list[str] | None) -> str:
-    """Resolve a letter/number selection to full option text.
+def _resolve_single(token: str, options: list[str]) -> str | None:
+    """Resolve one token (number or letter) to an option, or return None.
 
     Args:
-        response: Raw user input (e.g., "2", "b", or free text).
-        options: Available options, or None for open-ended questions.
+        token: Single stripped token, e.g. "2" or "b".
+        options: Available option texts.
 
     Returns:
-        Full option text if resolvable, otherwise the raw response.
+        Resolved option text, or None if unresolvable.
     """
-    if options is None:
-        return response
-
-    raw = response.strip().lower()
-
-    # Try as 1-indexed number
+    raw = token.strip().lower()
     try:
         idx = int(raw) - 1
         if 0 <= idx < len(options):
             return options[idx]
+        return None
     except ValueError:
         pass
-
-    # Try as letter (a=0, b=1, ...)
     if len(raw) == 1 and raw.isalpha():
         idx = ord(raw) - ord("a")
         if 0 <= idx < len(options):
             return options[idx]
+        return None
+    return None
 
-    return response
+
+def _resolve_answer(response: str, options: list[str] | None) -> str:
+    """Resolve a letter/number selection to full option text.
+
+    Handles single selections ("2", "b") and comma-separated multi-select
+    ("1, 2, 3" or "a, c"). For multi-select, all tokens must resolve
+    successfully; if any fail, the raw input is returned unchanged.
+
+    Args:
+        response: Raw user input (e.g., "2", "b", "1, 3", or free text).
+        options: Available options, or None for open-ended questions.
+
+    Returns:
+        Full option text if resolvable, otherwise the raw response.
+        Multi-select resolutions are joined with " | ".
+    """
+    if options is None:
+        return response
+
+    raw = response.strip()
+
+    # Try as comma-separated multi-select if a comma is present
+    if "," in raw:
+        tokens = [t.strip() for t in raw.split(",")]
+        resolved = [_resolve_single(t, options) for t in tokens]
+        if all(r is not None for r in resolved):
+            return " | ".join(r for r in resolved if r is not None)
+        return response
+
+    # Try single selection
+    single = _resolve_single(raw, options)
+    return single if single is not None else response
 
 
 def _idea_memory_from_state(state: BrainstormState) -> IdeaMemory:

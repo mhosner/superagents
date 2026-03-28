@@ -57,6 +57,13 @@ Only ask about sections rated "low" or "medium". \
 Never ask about "high" or "deferred" sections. \
 The question should be specific enough that the answer directly moves a section toward "high". \
 Prefer multiple-choice when the answer space is bounded. \
+Prefer questions with mutually exclusive options (pick one). \
+Avoid "select all that apply" — if multiple aspects need to be decided, ask them as \
+separate questions in subsequent rounds. \
+When multiple sections are rated "low" or "medium", prefer asking about sections earlier in \
+this dependency order: problem_statement → users_and_personas → requirements → \
+technical_constraints, acceptance_criteria, scope_boundaries. \
+Only target a derived section if all foundational sections are already "high". \
 Return as JSON: {{"questions": [{{"question": "...", "options": ["a", "b"] | null, \
 "targets_section": "section_name"}}]}}
 """
