@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
 from pathlib import Path
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from superagents_sdlc.cli import (
     _build_parser,
+    _build_pipeline_command,
     _extract_section_content,
     _handle_brainstorm_interrupt,
+    _run_brainstorm,
+    _slugify,
 )
 
 
@@ -45,11 +49,11 @@ def test_parse_brainstorm_with_codebase_context():
 
 
 def test_brainstorm_stub_end_to_end(tmp_path):
-    """Full brainstorm with --stub: answer question, select approach, approve 6 sections, approve brief."""
+    """Full brainstorm with --stub: answer question, select approach, approve 6 sections, approve brief, then done."""
     output_dir = tmp_path / "output"
 
-    # stdin: answer question, select approach, approve 6 sections, approve brief
-    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
+    # stdin: answer question, select approach, approve 6 sections, approve brief, handoff=done
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a", "d"]
 
     result = subprocess.run(
         [
@@ -96,7 +100,7 @@ def test_brainstorm_codebase_context_file(tmp_path):
     ctx_file.write_text("# Codebase\nPython monorepo with REST API")
     output_dir = tmp_path / "output"
 
-    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a", "d"]
 
     result = subprocess.run(
         [
@@ -116,9 +120,9 @@ def test_brainstorm_codebase_context_file(tmp_path):
     assert result.returncode == 0, f"stderr: {result.stderr}; stdout: {result.stdout}"
 
 
-def test_brainstorm_no_output_dir():
-    """Without --output-dir, brief prints to stdout but no file written."""
-    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
+def test_brainstorm_no_output_dir_uses_default(tmp_path):
+    """Without --output-dir, brief is written to superagents-output/{slug}/ in cwd."""
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a", "d"]
 
     result = subprocess.run(
         [
@@ -129,12 +133,14 @@ def test_brainstorm_no_output_dir():
         input="\n".join(stdin_lines) + "\n",
         capture_output=True,
         text=True,
-        cwd=_SDLC_DIR,
+        cwd=str(tmp_path),
         timeout=60,
     )
 
-    assert result.returncode == 0, f"stderr: {result.stderr}"
-    assert "Design Brief" in result.stdout
+    assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    expected = tmp_path / "superagents-output" / "test"
+    assert expected.exists(), f"Expected default output dir {expected} to be created"
+    assert (expected / "design_brief.md").exists()
 
 
 def test_idea_memory_written_to_disk(tmp_path):
@@ -236,3 +242,379 @@ async def test_stall_exit_handler_continue():
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="c"):
         result = await _handle_brainstorm_interrupt(payload, quiet=True)
     assert result == "continue"
+
+
+# --- B-05: disk-write before approval tests ---
+
+
+def test_section_filename_slugification():
+    """Section titles produce clean filenames without special chars."""
+    assert _slugify("Problem Statement & Goals") == "problem_statement_goals"
+    assert _slugify("Technical Constraints / Architecture") == "technical_constraints_architecture"
+    assert _slugify("  Leading & Trailing  ") == "leading_trailing"
+    assert _slugify("Target Users & Personas") == "target_users_personas"
+
+
+async def test_design_section_writes_to_disk_before_approval(tmp_path, capsys):
+    """design_section interrupt writes file to disk; path shown, content not printed."""
+    payload = {
+        "type": "design_section",
+        "title": "Problem Statement & Goals",
+        "content": "## Problem Statement\nThe app needs dark mode.",
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="approve"):
+        result = await _handle_brainstorm_interrupt(
+            payload, quiet=False, output_dir=tmp_path
+        )
+
+    expected_path = tmp_path / "sections" / "problem_statement_goals.md"
+    assert expected_path.exists()
+    assert expected_path.read_text() == "## Problem Statement\nThe app needs dark mode."
+
+    captured = capsys.readouterr()
+    assert "## Problem Statement" not in captured.out
+    assert str(expected_path) in captured.out
+    assert result == "approve"
+
+
+async def test_design_section_edit_writes_back(tmp_path):
+    """When user edits a section, the edited text is written back to disk."""
+    payload = {
+        "type": "design_section",
+        "title": "Problem Statement & Goals",
+        "content": "## Problem Statement\nOriginal content.",
+    }
+    with patch(
+        "superagents_sdlc.cli._async_input",
+        new_callable=AsyncMock,
+        return_value="## Problem Statement\nEdited by user.",
+    ):
+        result = await _handle_brainstorm_interrupt(
+            payload, quiet=True, output_dir=tmp_path
+        )
+
+    expected_path = tmp_path / "sections" / "problem_statement_goals.md"
+    assert expected_path.read_text() == "## Problem Statement\nEdited by user."
+    assert result == "## Problem Statement\nEdited by user."
+
+
+async def test_brief_writes_to_disk_before_approval(tmp_path, capsys):
+    """brief interrupt writes design_brief.md to disk; path shown, content not printed."""
+    payload = {
+        "type": "brief",
+        "brief": "# Design Brief\nFull brief content here.",
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="approve"):
+        result = await _handle_brainstorm_interrupt(
+            payload, quiet=False, output_dir=tmp_path
+        )
+
+    brief_path = tmp_path / "design_brief.md"
+    assert brief_path.exists()
+    assert brief_path.read_text() == "# Design Brief\nFull brief content here."
+
+    captured = capsys.readouterr()
+    assert "Full brief content here" not in captured.out
+    assert str(brief_path) in captured.out
+    assert result == "approve"
+
+
+async def test_no_output_dir_prints_inline(capsys):
+    """Without output_dir, section content and brief are printed inline (current behavior)."""
+    section_payload = {
+        "type": "design_section",
+        "title": "Problem Statement & Goals",
+        "content": "## Problem Statement\nThe app needs dark mode.",
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="approve"):
+        await _handle_brainstorm_interrupt(section_payload, quiet=False, output_dir=None)
+
+    captured = capsys.readouterr()
+    assert "## Problem Statement" in captured.out
+
+    brief_payload = {
+        "type": "brief",
+        "brief": "# Design Brief\nFull brief content here.",
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="approve"):
+        await _handle_brainstorm_interrupt(brief_payload, quiet=False, output_dir=None)
+
+    captured = capsys.readouterr()
+    assert "Full brief content here" in captured.out
+
+
+async def test_quiet_mode_still_writes_to_disk(tmp_path, capsys):
+    """quiet=True suppresses printing but still writes files when output_dir is provided."""
+    section_payload = {
+        "type": "design_section",
+        "title": "Problem Statement & Goals",
+        "content": "## Problem Statement\nContent.",
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="approve"):
+        await _handle_brainstorm_interrupt(
+            section_payload, quiet=True, output_dir=tmp_path
+        )
+
+    assert (tmp_path / "sections" / "problem_statement_goals.md").exists()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+# --- F-09: brainstorm → pipeline handoff tests ---
+
+def _make_args(
+    idea: str = "Add dark mode",
+    output_dir: str | None = None,
+    codebase_context: str | None = None,
+    quiet: bool = False,
+    stub: bool = True,
+    interactive: bool = False,
+    model: str = "claude-sonnet-4-6",
+    max_tokens: int = 16384,
+    fast_model: str | None = None,
+    context_dir: str | None = None,
+) -> argparse.Namespace:
+    """Build a minimal argparse.Namespace for _run_brainstorm."""
+    return argparse.Namespace(
+        idea=idea,
+        output_dir=output_dir,
+        codebase_context=codebase_context,
+        quiet=quiet,
+        stub=stub,
+        interactive=interactive,
+        model=model,
+        max_tokens=max_tokens,
+        fast_model=fast_model,
+        context_dir=context_dir,
+    )
+
+
+def _make_complete_graph() -> MagicMock:
+    """Return a mock graph that immediately returns a complete brainstorm state."""
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value={
+        "status": "complete",
+        "brief": "# Design Brief\nTest brief.",
+        "idea_memory": [],
+        "idea_memory_counts": {"decision": 0, "rejection": 0},
+    })
+    return mock_graph
+
+
+def test_default_output_dir_from_idea(tmp_path):
+    """No --output-dir defaults to superagents-output/{slug}/ in cwd."""
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a", "d"]
+
+    result = subprocess.run(
+        [sys.executable, "-m", "superagents_sdlc.cli", "brainstorm", "Add dark mode", "--stub"],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    expected = tmp_path / "superagents-output" / "add_dark_mode"
+    assert expected.exists(), f"Expected default output dir {expected} to be created"
+    assert (expected / "design_brief.md").exists()
+
+
+def test_output_dir_overwrite_prompt_yes(tmp_path):
+    """When default dir exists with files, 'y' allows overwrite and brainstorm proceeds."""
+    default_dir = tmp_path / "superagents-output" / "add_dark_mode"
+    default_dir.mkdir(parents=True)
+    (default_dir / "existing_file.md").write_text("old content")
+
+    # "y" = overwrite, then brainstorm flow, then "d" = done
+    stdin_lines = ["y", "developers", "Simple", "a", "a", "a", "a", "a", "a", "a", "d"]
+
+    result = subprocess.run(
+        [sys.executable, "-m", "superagents_sdlc.cli", "brainstorm", "Add dark mode", "--stub"],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    assert "already exists" in result.stdout or "Overwrite" in result.stdout
+    assert (default_dir / "design_brief.md").exists()
+
+
+def test_output_dir_overwrite_prompt_no_then_alternative(tmp_path):
+    """'n' at overwrite prompt lets user specify an alternative output path."""
+    default_dir = tmp_path / "superagents-output" / "add_dark_mode"
+    default_dir.mkdir(parents=True)
+    (default_dir / "existing_file.md").write_text("old content")
+
+    alt_dir = tmp_path / "my_output"
+
+    stdin_lines = [
+        "n",           # decline overwrite
+        str(alt_dir),  # alternative path
+        "developers", "Simple", "a", "a", "a", "a", "a", "a", "a",
+        "d",           # handoff = done
+    ]
+
+    result = subprocess.run(
+        [sys.executable, "-m", "superagents_sdlc.cli", "brainstorm", "Add dark mode", "--stub"],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    assert (alt_dir / "design_brief.md").exists(), "Brief should be at alternative path"
+
+
+def test_handoff_prompt_done_exits(tmp_path):
+    """'d' at handoff prompt exits without spawning pipeline."""
+    output_dir = tmp_path / "output"
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a", "d"]
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "brainstorm", "Add dark mode", "--stub",
+            "--output-dir", str(output_dir),
+        ],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=_SDLC_DIR,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "(p)ipeline" in result.stdout or "pipeline" in result.stdout.lower()
+    assert not (output_dir / "pipeline").exists()
+
+
+async def test_handoff_prompt_pipeline_spawns_subprocess(tmp_path):
+    """'p' at handoff prompt spawns idea-to-code subprocess with correct args."""
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    args = _make_args(idea="Add dark mode", output_dir=str(output_dir), quiet=False)
+    mock_proc = MagicMock(returncode=0)
+
+    with patch("superagents_sdlc.brainstorm.graph.build_brainstorm_graph", return_value=_make_complete_graph()), \
+         patch("subprocess.run", return_value=mock_proc) as mock_run, \
+         patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"), \
+         patch("superagents_sdlc.cli_spinner.print_banner"), \
+         patch("superagents_sdlc.cli_spinner.Spinner"):
+        exit_code = await _run_brainstorm(args)
+
+    assert exit_code == 0
+    mock_run.assert_called_once()
+    cmd = mock_run.call_args[0][0]
+    assert "idea-to-code" in cmd
+    assert "Add dark mode" in cmd
+    assert "--brief" in cmd
+    assert str(output_dir / "design_brief.md") in cmd
+    assert "--idea-memory" in cmd
+    assert str(output_dir / "idea_memory.md") in cmd
+    assert any(str(output_dir / "pipeline") in arg for arg in cmd)
+
+
+async def test_handoff_writes_handoff_md(tmp_path):
+    """After pipeline run, handoff.md is written with key metadata."""
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    args = _make_args(idea="Add dark mode", output_dir=str(output_dir), quiet=False)
+    mock_proc = MagicMock(returncode=0)
+
+    with patch("superagents_sdlc.brainstorm.graph.build_brainstorm_graph", return_value=_make_complete_graph()), \
+         patch("subprocess.run", return_value=mock_proc), \
+         patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"), \
+         patch("superagents_sdlc.cli_spinner.print_banner"), \
+         patch("superagents_sdlc.cli_spinner.Spinner"):
+        await _run_brainstorm(args)
+
+    handoff_path = output_dir / "handoff.md"
+    assert handoff_path.exists()
+    content = handoff_path.read_text()
+    assert "Add dark mode" in content
+    assert "design_brief.md" in content
+    assert "idea_memory.md" in content
+    assert "pipeline" in content
+
+
+def test_quiet_mode_skips_handoff_prompt(tmp_path):
+    """quiet=True exits after brief without showing handoff prompt."""
+    output_dir = tmp_path / "output"
+    # No "d" needed — quiet mode skips handoff prompt
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "brainstorm", "Add dark mode", "--stub", "--quiet",
+            "--output-dir", str(output_dir),
+        ],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=_SDLC_DIR,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert not (output_dir / "handoff.md").exists()
+
+
+async def test_codebase_context_forwarded(tmp_path):
+    """--codebase-context is forwarded to the pipeline subprocess command."""
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    ctx_file = tmp_path / "context.md"
+    ctx_file.write_text("# Context")
+
+    args = _make_args(
+        idea="Add dark mode",
+        output_dir=str(output_dir),
+        codebase_context=str(ctx_file),
+        quiet=False,
+    )
+    mock_proc = MagicMock(returncode=0)
+
+    with patch("superagents_sdlc.brainstorm.graph.build_brainstorm_graph", return_value=_make_complete_graph()), \
+         patch("subprocess.run", return_value=mock_proc) as mock_run, \
+         patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"), \
+         patch("superagents_sdlc.cli_spinner.print_banner"), \
+         patch("superagents_sdlc.cli_spinner.Spinner"):
+        await _run_brainstorm(args)
+
+    cmd = mock_run.call_args[0][0]
+    assert "--codebase-context" in cmd
+    assert str(ctx_file) in cmd
+
+
+def test_build_pipeline_command_basic(tmp_path):
+    """_build_pipeline_command returns expected argument list."""
+    args = _make_args(idea="Add dark mode", output_dir=str(tmp_path))
+    output_dir = Path(tmp_path)
+
+    cmd = _build_pipeline_command(args, output_dir)
+
+    assert "idea-to-code" in cmd
+    assert "Add dark mode" in cmd
+    assert "--brief" in cmd
+    assert str(output_dir / "design_brief.md") in cmd
+    assert "--idea-memory" in cmd
+    assert str(output_dir / "idea_memory.md") in cmd
+    assert "--output-dir" in cmd
+    assert str(output_dir / "pipeline") in cmd
+
+
+def test_build_pipeline_command_includes_codebase_context(tmp_path):
+    """_build_pipeline_command includes --codebase-context when set."""
+    args = _make_args(idea="Test", output_dir=str(tmp_path), codebase_context="/path/ctx.md")
+    cmd = _build_pipeline_command(args, Path(tmp_path))
+    assert "--codebase-context" in cmd
+    assert "/path/ctx.md" in cmd

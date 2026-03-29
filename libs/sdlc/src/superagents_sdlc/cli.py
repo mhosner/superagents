@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -291,6 +293,26 @@ def _brainstorm_stub_responses() -> dict[str, str]:
     }
 
 
+def _slugify(title: str) -> str:
+    """Convert a section title to a safe filename stem.
+
+    Lowercases the title and replaces any sequence of non-alphanumeric
+    characters with a single underscore, then strips leading/trailing
+    underscores.
+
+    Args:
+        title: Human-readable section title (e.g. "Problem Statement & Goals").
+
+    Returns:
+        Filename stem without extension (e.g. "problem_statement_goals").
+    """
+    import re  # noqa: PLC0415
+
+    slug = title.lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", slug)
+    return slug.strip("_")
+
+
 def _extract_section_content(raw: str) -> str:
     """Extract content from a JSON-wrapped design section response.
 
@@ -310,12 +332,49 @@ def _extract_section_content(raw: str) -> str:
         return raw
 
 
-async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) -> str:
+def _build_pipeline_command(args: argparse.Namespace, output_dir: Path) -> list[str]:
+    """Build the idea-to-code pipeline subprocess command.
+
+    Args:
+        args: Parsed CLI arguments from the brainstorm run.
+        output_dir: Brainstorm output directory.
+
+    Returns:
+        Command list suitable for ``subprocess.run``.
+    """
+    cmd = [
+        "uv", "run", "superagents-sdlc", "idea-to-code", args.idea,
+        "--brief", str(output_dir / "design_brief.md"),
+        "--idea-memory", str(output_dir / "idea_memory.md"),
+        "--output-dir", str(output_dir / "pipeline"),
+    ]
+    if args.codebase_context:
+        cmd.extend(["--codebase-context", args.codebase_context])
+    if getattr(args, "model", None):
+        cmd.extend(["--model", args.model])
+    if getattr(args, "fast_model", None):
+        cmd.extend(["--fast-model", args.fast_model])
+    if getattr(args, "max_tokens", None):
+        cmd.extend(["--max-tokens", str(args.max_tokens)])
+    if getattr(args, "interactive", False):
+        cmd.append("--interactive")
+    return cmd
+
+
+async def _handle_brainstorm_interrupt(
+    payload: dict,
+    *,
+    quiet: bool = False,
+    output_dir: Path | None = None,
+) -> str:
     """Handle a brainstorm interrupt by prompting the user.
 
     Args:
         payload: Interrupt payload with type and data.
         quiet: If True, suppress output and return defaults.
+        output_dir: Directory to write artifacts to disk before approval.
+            When provided, design sections and briefs are written to disk
+            and only the file path is shown (not the full content).
 
     Returns:
         User's response string.
@@ -433,17 +492,40 @@ async def _handle_brainstorm_interrupt(payload: dict, *, quiet: bool = False) ->
         return response
 
     if interrupt_type == "design_section":
-        if not quiet:
+        content = _extract_section_content(payload["content"])
+        if output_dir is not None:
+            sections_dir = output_dir / "sections"
+            sections_dir.mkdir(parents=True, exist_ok=True)
+            section_path = sections_dir / f"{_slugify(payload['title'])}.md"
+            section_path.write_text(content)
+            if not quiet:
+                print(f"\n--- {payload['title']} ---")  # noqa: T201
+                print(f"📄 {section_path}")  # noqa: T201
+                print("\n  approve (a) / edit (paste text) / quit (q)")  # noqa: T201
+        elif not quiet:
             print(f"\n--- {payload['title']} ---")  # noqa: T201
-            print(_extract_section_content(payload["content"]))  # noqa: T201
+            print(content)  # noqa: T201
             print("\n  approve (a) / edit (paste text) / quit (q)")  # noqa: T201
         response = await _async_input("> ")
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
-        return "approve" if response.strip().lower() in ("a", "approve") else response
+        if response.strip().lower() in ("a", "approve"):
+            return "approve"
+        # User provided edited text — write back to disk if output_dir set
+        if output_dir is not None:
+            section_path.write_text(response)
+        return response
 
     if interrupt_type == "brief":
-        if not quiet:
+        if output_dir is not None:
+            brief_path = output_dir / "design_brief.md"
+            brief_path.parent.mkdir(parents=True, exist_ok=True)
+            brief_path.write_text(payload["brief"])
+            if not quiet:
+                print("\n--- Design Brief ---")  # noqa: T201
+                print(f"📄 {brief_path}")  # noqa: T201
+                print("\n  approve (a) / revise (type feedback) / quit (q)")  # noqa: T201
+        elif not quiet:
             print("\n--- Design Brief ---")  # noqa: T201
             print(payload["brief"])  # noqa: T201
             print("\n  approve (a) / revise (type feedback) / quit (q)")  # noqa: T201
@@ -488,6 +570,29 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
     from langgraph.types import Command  # noqa: PLC0415
 
     from superagents_sdlc.brainstorm.graph import build_brainstorm_graph  # noqa: PLC0415
+
+    # Resolve output directory — default to ./superagents-output/{slug}/
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        output_dir = Path("superagents-output") / _slugify(args.idea)
+
+    # Overwrite check: prompt if dir exists and contains files
+    while output_dir.exists() and any(output_dir.iterdir()):
+        if not args.quiet:
+            print(f"\n⚠️  Output directory {output_dir} already exists. Overwrite? (y/n)")  # noqa: T201
+        response = await _async_input("> ")
+        if response.strip().lower() in ("q", "quit"):
+            return 0
+        if response.strip().lower() in ("y", "yes"):
+            break
+        # User said no — ask for alternative path
+        if not args.quiet:
+            print("Enter alternative output path>")  # noqa: T201
+        alt = await _async_input("> ")
+        if alt.strip().lower() in ("q", "quit"):
+            return 0
+        output_dir = Path(alt.strip())
 
     # Build LLM client
     if args.stub:
@@ -560,7 +665,9 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
         while result.get("__interrupt__"):
             payload = result["__interrupt__"][0].value
             response = await _handle_brainstorm_interrupt(
-                payload, quiet=args.quiet
+                payload,
+                quiet=args.quiet,
+                output_dir=output_dir,
             )
             result = await graph.ainvoke(Command(resume=response), config)
     except _BrainstormQuit:
@@ -568,29 +675,59 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
             print("\nBrainstorm cancelled.")  # noqa: T201
         return 0
 
-    # Output brief
+    # Write brief and IdeaMemory (idempotent safety net — also written during interrupts)
     brief = result.get("brief", "")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "design_brief.md").write_text(brief)
     if not args.quiet:
-        print(f"\n{brief}")  # noqa: T201
+        print(f"\nBrief written to {output_dir / 'design_brief.md'}")  # noqa: T201
 
-    if args.output_dir:
-        out = Path(args.output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "design_brief.md").write_text(brief)
-        if not args.quiet:
-            print(f"\nBrief written to {out / 'design_brief.md'}")  # noqa: T201
+    from superagents_sdlc.brainstorm.idea_memory import IdeaMemory  # noqa: PLC0415
 
-        # Write IdeaMemory
-        from superagents_sdlc.brainstorm.idea_memory import IdeaMemory  # noqa: PLC0415
+    memory = IdeaMemory.from_state(
+        args.idea,
+        result.get("idea_memory", []),
+        result.get("idea_memory_counts", {"decision": 0, "rejection": 0}),
+    )
+    (output_dir / "idea_memory.md").write_text(memory.to_markdown())
+    if not args.quiet:
+        print(f"IdeaMemory written to {output_dir / 'idea_memory.md'}")  # noqa: T201
 
-        memory = IdeaMemory.from_state(
-            args.idea,
-            result.get("idea_memory", []),
-            result.get("idea_memory_counts", {"decision": 0, "rejection": 0}),
-        )
-        (out / "idea_memory.md").write_text(memory.to_markdown())
-        if not args.quiet:
-            print(f"IdeaMemory written to {out / 'idea_memory.md'}")  # noqa: T201
+    # Handoff prompt — skipped in quiet mode
+    if args.quiet:
+        return 0
+
+    print("\n  (p)ipeline — send brief to idea-to-code pipeline")  # noqa: T201
+    print("  (d)one — exit")  # noqa: T201
+    try:
+        choice = (await _async_input("\n> ")).strip().lower()
+    except EOFError:
+        choice = "d"
+
+    if choice not in ("p", "pipeline"):
+        return 0
+
+    # Launch pipeline subprocess
+    cmd = _build_pipeline_command(args, output_dir)
+    print(f"\nLaunching pipeline: {' '.join(cmd)}")  # noqa: T201
+    proc = subprocess.run(cmd)  # noqa: S603
+    print(f"\nPipeline complete (exit code {proc.returncode}). Artifacts: {output_dir}/pipeline/")  # noqa: T201
+
+    # Write handoff record
+    timestamp = datetime.datetime.now().isoformat()
+    cmd_str = " ".join(cmd)
+    handoff_content = (
+        f"# Brainstorm → Pipeline Handoff\n\n"
+        f"- **Idea:** {args.idea}\n"
+        f"- **Handoff time:** {timestamp}\n"
+        f"- **Brief:** {output_dir}/design_brief.md\n"
+        f"- **IdeaMemory:** {output_dir}/idea_memory.md\n"
+        f"- **Codebase context:** {args.codebase_context or 'None'}\n"
+        f"- **Pipeline output:** {output_dir}/pipeline/\n"
+        f"- **Pipeline command:** {cmd_str}\n"
+        f"- **Pipeline exit code:** {proc.returncode}\n"
+    )
+    (output_dir / "handoff.md").write_text(handoff_content)
 
     return 0
 
