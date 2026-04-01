@@ -914,3 +914,115 @@ async def test_stall_exit_continue_resets_counter():
 
     assert result["status"] == "questioning"
     assert result["stall_counter"] == 0
+
+
+# --- F-07: narrative entry tests ---
+
+
+async def test_question_answered_appends_narrative_entry():
+    """generate_question appends a question_answered narrative entry."""
+    llm = StubLLMClient(responses={
+        "## Gaps to address": json.dumps({
+            "questions": [
+                {"question": "Storage?", "options": ["JSON", "SQLite"],
+                 "targets_section": "technical_constraints"},
+            ],
+        }),
+    })
+    node = make_generate_question_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value=[
+        {"answer": "SQLite", "targets_section": "technical_constraints", "question_text": "Storage?"},
+    ]):
+        result = await node(_make_state(confidence_score=40))
+
+    assert "narrative_entries" in result
+    entries = result["narrative_entries"]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["event"] == "question_answered"
+    assert entry["question_text"] == "Storage?"
+    assert entry["answer_text"] == "SQLite"
+    assert entry["round"] == 1  # round_number 0 + 1
+
+
+async def test_approach_selected_appends_narrative_entry():
+    """propose_approaches appends an approach_selected narrative entry."""
+    llm = StubLLMClient(responses={
+        "Propose 2-3": json.dumps([
+            {"name": "Simple", "description": "d", "tradeoffs": "t"},
+            {"name": "Complex", "description": "d2", "tradeoffs": "t2"},
+        ]),
+    })
+    node = make_propose_approaches_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="Simple"):
+        result = await node(_make_state(status="proposing"))
+
+    assert "narrative_entries" in result
+    entries = result["narrative_entries"]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["event"] == "approach_selected"
+    assert entry["approach_name"] == "Simple"
+    assert entry["approaches_offered"] == ["Simple", "Complex"]
+
+
+async def test_section_approved_appends_narrative_entry():
+    """generate_design_section appends section_approved on 'approve'."""
+    llm = StubLLMClient(responses={
+        "Problem Statement": "## Problem\nContent here",
+    })
+    node = make_generate_design_section_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="approve"):
+        result = await node(_make_state(
+            status="designing",
+            selected_approach="Simple",
+            current_section_idx=0,
+        ))
+
+    assert "narrative_entries" in result
+    entry = result["narrative_entries"][0]
+    assert entry["event"] == "section_approved"
+    assert entry["section_title"] == "Problem Statement & Goals"
+
+
+async def test_section_revised_appends_narrative_entry():
+    """generate_design_section appends section_revised on edit."""
+    llm = StubLLMClient(responses={
+        "Problem Statement": "## Problem\nDraft",
+    })
+    node = make_generate_design_section_node(llm)
+
+    with patch(_INTERRUPT_PATH, return_value="## Problem\nRevised"):
+        result = await node(_make_state(
+            status="designing",
+            selected_approach="Simple",
+            current_section_idx=0,
+        ))
+
+    assert "narrative_entries" in result
+    entry = result["narrative_entries"][0]
+    assert entry["event"] == "section_revised"
+    assert entry["section_title"] == "Problem Statement & Goals"
+
+
+async def test_brief_approved_appends_narrative_entry():
+    """synthesize_brief appends brief_approved on 'approve'."""
+    llm = StubLLMClient(responses={
+        "Synthesize all": "# Design Brief\nFull content",
+    })
+    node = make_synthesize_brief_node(llm)
+
+    sections = [{"title": "T", "content": "C", "approved": True}]
+    with patch(_INTERRUPT_PATH, return_value="approve"):
+        result = await node(_make_state(
+            status="synthesizing",
+            design_sections=sections,
+            selected_approach="Simple",
+        ))
+
+    assert "narrative_entries" in result
+    entry = result["narrative_entries"][0]
+    assert entry["event"] == "brief_approved"

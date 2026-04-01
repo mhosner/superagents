@@ -168,11 +168,21 @@ def make_stall_exit_node() -> Callable[..., Any]:
 
         response_str = str(response).strip().lower()
 
+        narrative = list(state.get("narrative_entries", []))
+        narrative.append({
+            "event": "stall_exit",
+            "round": state.get("round_number", 0),
+            "confidence": state.get("confidence_score", 0),
+            "confidence_delta": None,
+            "choice": response_str,
+            "gaps": state.get("gaps", []),
+        })
+
         if response_str == "proceed":
-            return {"status": "proposing"}
+            return {"status": "proposing", "narrative_entries": narrative}
 
         # Default: continue questioning with reset counter
-        return {"status": "questioning", "stall_counter": 0}
+        return {"status": "questioning", "stall_counter": 0, "narrative_entries": narrative}
 
     return stall_exit
 
@@ -258,11 +268,26 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
             )
             memory.add_decision(title=title, text=entry["answer"], section=section)
 
+        # Append narrative entries for each answered question
+        new_round = state.get("round_number", 0) + 1
+        narrative = list(state.get("narrative_entries", []))
+        for entry in updated[len(state["transcript"]):]:
+            narrative.append({
+                "event": "question_answered",
+                "round": new_round,
+                "confidence": state.get("confidence_score", 0),
+                "confidence_delta": None,
+                "question_text": entry.get("question", "?"),
+                "answer_text": entry.get("answer", ""),
+                "options": [],
+            })
+
         return {
             "transcript": updated,
             "round_number": state.get("round_number", 0) + 1,
             "idea_memory": memory.to_state(),
             "idea_memory_counts": memory.counts,
+            "narrative_entries": narrative,
         }
 
     return generate_question
@@ -298,11 +323,22 @@ def make_propose_approaches_node(llm: LLMClient) -> Callable[..., Any]:
             "approaches": approaches,
         })
 
+        narrative = list(state.get("narrative_entries", []))
+        narrative.append({
+            "event": "approach_selected",
+            "round": None,
+            "confidence": None,
+            "confidence_delta": None,
+            "approach_name": selected,
+            "approaches_offered": [a["name"] for a in approaches],
+        })
+
         return {
             "approaches": approaches,
             "selected_approach": selected,
             "status": "designing",
             "current_section_idx": 0,
+            "narrative_entries": narrative,
         }
 
     return propose_approaches
@@ -350,7 +386,17 @@ def make_generate_design_section_node(llm: LLMClient) -> Callable[..., Any]:
         })
 
         # If approved, use LLM content. Otherwise, use human's edited text.
-        final_content = content if response.strip().lower() in ("approve", "a") else response
+        approved = response.strip().lower() in ("approve", "a")
+        final_content = content if approved else response
+
+        narrative = list(state.get("narrative_entries", []))
+        narrative.append({
+            "event": "section_approved" if approved else "section_revised",
+            "round": None,
+            "confidence": None,
+            "confidence_delta": None,
+            "section_title": section_title,
+        })
 
         updated_sections = list(state["design_sections"])
         updated_sections.append({
@@ -366,6 +412,7 @@ def make_generate_design_section_node(llm: LLMClient) -> Callable[..., Any]:
             "design_sections": updated_sections,
             "current_section_idx": next_idx,
             "status": next_status,
+            "narrative_entries": narrative,
         }
 
     return generate_design_section
@@ -418,13 +465,29 @@ def make_synthesize_brief_node(llm: LLMClient) -> Callable[..., Any]:
         })
 
         if response.strip().lower() in ("approve", "a"):
-            return {"brief": brief, "status": "complete"}
+            narrative = list(state.get("narrative_entries", []))
+            narrative.append({
+                "event": "brief_approved",
+                "round": None,
+                "confidence": None,
+                "confidence_delta": None,
+            })
+            return {"brief": brief, "status": "complete", "narrative_entries": narrative}
 
         # Revision requested
         revision_count = state["brief_revision_count"] + 1
-        if revision_count >= MAX_BRIEF_REVISIONS:
-            return {"brief": brief, "status": "complete", "brief_revision_count": revision_count}
+        narrative = list(state.get("narrative_entries", []))
+        narrative.append({
+            "event": "brief_revised",
+            "round": None,
+            "confidence": None,
+            "confidence_delta": None,
+            "revision_number": revision_count,
+        })
 
-        return {"brief_revision_count": revision_count, "status": "synthesizing"}
+        if revision_count >= MAX_BRIEF_REVISIONS:
+            return {"brief": brief, "status": "complete", "brief_revision_count": revision_count, "narrative_entries": narrative}
+
+        return {"brief_revision_count": revision_count, "status": "synthesizing", "narrative_entries": narrative}
 
     return synthesize_brief
