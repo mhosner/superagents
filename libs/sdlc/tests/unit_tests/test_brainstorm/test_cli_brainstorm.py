@@ -639,7 +639,7 @@ async def test_auto_continue_when_far_below_threshold(capsys):
     with patch("superagents_sdlc.cli._async_input", mock_input):
         result = await _handle_brainstorm_interrupt(payload, quiet=False)
 
-    assert result == "continue"
+    assert result == "auto_continue"
     mock_input.assert_not_called()
     captured = capsys.readouterr()
     assert "auto-continuing" in captured.out.lower()
@@ -723,6 +723,29 @@ async def test_auto_continue_quiet_mode(capsys):
     with patch("superagents_sdlc.cli._async_input", mock_input):
         result = await _handle_brainstorm_interrupt(payload, quiet=True)
 
-    assert result == "continue"
+    assert result == "auto_continue"
     captured = capsys.readouterr()
     assert captured.out == ""
+
+
+# --- F-07: auto-continue returns "auto_continue" ---
+
+
+async def test_auto_continue_sends_auto_continue_value(capsys):
+    """Auto-continue returns 'auto_continue', not 'continue'."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 45,
+        "threshold": 80,
+        "round": 2,
+        "sections": {},
+        "summaries": {},
+        "gaps": [{"section": "goals", "description": "Missing success metrics"}],
+        "options": ["continue", "defer", "override"],
+    }
+    mock_input = AsyncMock(return_value="continue")
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _handle_brainstorm_interrupt(payload, quiet=False)
+
+    assert result == "auto_continue"
+    mock_input.assert_not_called()

@@ -464,7 +464,7 @@ async def _handle_brainstorm_interrupt(
                     f"\n  Confidence {confidence}/{threshold}"
                     f" — auto-continuing ({len(gaps)} gaps remaining)"
                 )
-            return "continue"
+            return "auto_continue"
 
         if not quiet:
             print(f"\nConfidence Assessment: {confidence}% (threshold: {threshold}%)")  # noqa: T201
@@ -710,6 +710,16 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
     (output_dir / "idea_memory.md").write_text(memory.to_markdown())
     if not args.quiet:
         print(f"IdeaMemory written to {output_dir / 'idea_memory.md'}")  # noqa: T201
+
+    from superagents_sdlc.brainstorm.narrative import render_narrative_markdown  # noqa: PLC0415
+
+    narrative_md = render_narrative_markdown(
+        result.get("narrative_entries", []),
+        args.idea,
+    )
+    (output_dir / "brainstorm_narrative.md").write_text(narrative_md)
+    if not args.quiet:
+        print(f"Narrative written to {output_dir / 'brainstorm_narrative.md'}")  # noqa: T201
 
     # Handoff prompt — skipped in quiet mode
     if args.quiet:
