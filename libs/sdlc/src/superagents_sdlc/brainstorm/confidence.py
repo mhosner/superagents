@@ -199,12 +199,15 @@ def make_estimate_confidence_node(
                 "cached_assessment": {},
             }
 
+            round_num = state.get("round_number", 0)
             assessment_entry = {
                 "event": "assessment",
+                "round": round_num,
                 "confidence": score,
                 "confidence_delta": delta,
-                "section_readiness": section_readiness,
                 "gap_count": len(gaps),
+                "section_readiness": section_readiness,
+                "readiness_changes": changes,
             }
 
             if response_str == "override":
@@ -239,9 +242,9 @@ def make_estimate_confidence_node(
             if response_str == "auto_continue":
                 narrative.append({
                     "event": "auto_continue",
+                    "round": round_num,
                     "confidence": score,
                     "confidence_delta": delta,
-                    "section_readiness": section_readiness,
                     "gap_count": len(gaps),
                 })
                 return {**base, "status": "questioning", "narrative_entries": narrative}
@@ -295,10 +298,12 @@ def make_estimate_confidence_node(
             narrative = list(state.get("narrative_entries", []))
             narrative.append({
                 "event": "assessment",
+                "round": state.get("round_number", 0),
                 "confidence": score,
                 "confidence_delta": auto_delta,
-                "section_readiness": section_readiness,
                 "gap_count": len(gaps),
+                "section_readiness": section_readiness,
+                "readiness_changes": auto_changes,
             })
             return {
                 "section_readiness": section_readiness,
@@ -333,10 +338,12 @@ def make_estimate_confidence_node(
             narrative = list(state.get("narrative_entries", []))
             narrative.append({
                 "event": "assessment",
+                "round": state.get("round_number", 0),
                 "confidence": score,
                 "confidence_delta": confidence_delta,
-                "section_readiness": section_readiness,
                 "gap_count": len(gaps),
+                "section_readiness": section_readiness,
+                "readiness_changes": readiness_changes,
             })
             return {
                 "section_readiness": section_readiness,
