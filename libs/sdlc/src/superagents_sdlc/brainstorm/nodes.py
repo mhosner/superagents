@@ -144,6 +144,7 @@ def make_explore_context_node() -> Callable[..., Any]:
             "previous_confidence": 0.0,
             "section_summaries": {},
             "cached_assessment": {},
+            "narrative_entries": [],
         }
 
     return explore_context
