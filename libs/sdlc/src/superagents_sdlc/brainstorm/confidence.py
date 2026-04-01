@@ -133,6 +133,20 @@ def make_estimate_confidence_node(
         Async node function.
     """
 
+    def _compute_readiness_changes(
+        old: dict, new: dict,
+    ) -> dict[str, dict[str, str]]:
+        """Compare old and new section readiness, return changes."""
+        changes: dict[str, dict[str, str]] = {}
+        for section, info in new.items():
+            new_r = info.get("readiness", "?")
+            old_r = "?"
+            if section in old and old[section]:
+                old_r = old[section].get("readiness", "?")
+            if new_r != old_r:
+                changes[section] = {"from": old_r, "to": new_r}
+        return changes
+
     async def estimate_confidence(state: BrainstormState) -> dict[str, Any]:
         """Assess section readiness and route to questions or approaches.
 
@@ -171,6 +185,10 @@ def make_estimate_confidence_node(
 
             response_str = str(response).strip().lower()
 
+            delta = cached.get("confidence_delta", 0)
+            changes = cached.get("readiness_changes", {})
+            narrative = list(state.get("narrative_entries", []))
+
             base = {
                 "section_readiness": section_readiness,
                 "confidence_score": score,
@@ -181,8 +199,18 @@ def make_estimate_confidence_node(
                 "cached_assessment": {},
             }
 
+            assessment_entry = {
+                "event": "assessment",
+                "confidence": score,
+                "confidence_delta": delta,
+                "section_readiness": section_readiness,
+                "gap_count": len(gaps),
+            }
+
             if response_str == "override":
-                return {**base, "status": "proposing"}
+                narrative.append(assessment_entry)
+                narrative.append({"event": "override", "confidence": score})
+                return {**base, "status": "proposing", "narrative_entries": narrative}
 
             if response_str.startswith("defer"):
                 parts = response_str.split(maxsplit=1)
@@ -192,6 +220,12 @@ def make_estimate_confidence_node(
                     new_deferred = list(set(deferred + names))
                 new_score = compute_confidence(section_readiness, new_deferred)
                 new_status = "proposing" if new_score >= threshold else "questioning"
+                narrative.append(assessment_entry)
+                narrative.append({
+                    "event": "deferral",
+                    "confidence": new_score,
+                    "deferred_sections": new_deferred,
+                })
                 return {
                     **base,
                     "confidence_score": new_score,
@@ -199,10 +233,22 @@ def make_estimate_confidence_node(
                     "deferred_sections": new_deferred,
                     "status": new_status,
                     "previous_confidence": float(new_score),
+                    "narrative_entries": narrative,
                 }
 
+            if response_str == "auto_continue":
+                narrative.append({
+                    "event": "auto_continue",
+                    "confidence": score,
+                    "confidence_delta": delta,
+                    "section_readiness": section_readiness,
+                    "gap_count": len(gaps),
+                })
+                return {**base, "status": "questioning", "narrative_entries": narrative}
+
             # Default: continue questioning
-            return {**base, "status": "questioning"}
+            narrative.append(assessment_entry)
+            return {**base, "status": "questioning", "narrative_entries": narrative}
 
         # --- Pass 1: no cache → call LLM, compute, cache result ---
         deferred_note = ""
@@ -242,6 +288,18 @@ def make_estimate_confidence_node(
 
         # Auto-proceed if above threshold — no interrupt needed
         if score >= threshold:
+            prev = state.get("previous_confidence", 0.0)
+            auto_delta = score - int(prev)
+            old_readiness = dict(state.get("section_readiness", {}))
+            auto_changes = _compute_readiness_changes(old_readiness, section_readiness)
+            narrative = list(state.get("narrative_entries", []))
+            narrative.append({
+                "event": "assessment",
+                "confidence": score,
+                "confidence_delta": auto_delta,
+                "section_readiness": section_readiness,
+                "gap_count": len(gaps),
+            })
             return {
                 "section_readiness": section_readiness,
                 "confidence_score": score,
@@ -251,6 +309,7 @@ def make_estimate_confidence_node(
                 "previous_confidence": float(score),
                 "section_summaries": summaries,
                 "cached_assessment": {},
+                "narrative_entries": narrative,
             }
 
         # Stall detection
@@ -263,8 +322,22 @@ def make_estimate_confidence_node(
         else:
             counter += 1
 
+        confidence_delta = score - int(prev)
+        old_readiness = dict(state.get("section_readiness", {}))
+        readiness_changes = _compute_readiness_changes(
+            old_readiness, section_readiness,
+        )
+
         if counter >= 3:
             # Stall detected — route to stall_exit, no interrupt
+            narrative = list(state.get("narrative_entries", []))
+            narrative.append({
+                "event": "assessment",
+                "confidence": score,
+                "confidence_delta": confidence_delta,
+                "section_readiness": section_readiness,
+                "gap_count": len(gaps),
+            })
             return {
                 "section_readiness": section_readiness,
                 "confidence_score": score,
@@ -274,6 +347,7 @@ def make_estimate_confidence_node(
                 "previous_confidence": float(score),
                 "section_summaries": summaries,
                 "cached_assessment": {},
+                "narrative_entries": narrative,
             }
 
         # Below threshold, no stall — cache and route back for HITL
@@ -291,6 +365,8 @@ def make_estimate_confidence_node(
                 "gaps": gaps,
                 "section_summaries": summaries,
                 "stall_counter": counter,
+                "confidence_delta": confidence_delta,
+                "readiness_changes": readiness_changes,
             },
         }
 

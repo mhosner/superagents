@@ -400,3 +400,86 @@ def test_build_section_summaries_no_entries():
     readiness = {"scope_boundaries": {"readiness": "low"}}
     result = _build_section_summaries(readiness, [])
     assert result["scope_boundaries"] == "No decision made yet."
+
+
+# --- F-07: narrative entry tests ---
+
+
+async def test_cached_assessment_includes_delta_and_readiness_changes():
+    """Pass 1 caches confidence_delta and readiness_changes for narrative."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    # previous_confidence=30, score will be 60 → delta=30
+    # previous section_readiness has problem_statement as low,
+    # new assessment has it as high → readiness change
+    result = await node(_make_state(
+        previous_confidence=30.0,
+        section_readiness={
+            "problem_statement": {"readiness": "low"},
+            "users_and_personas": {"readiness": "low"},
+        },
+    ))
+
+    assert result["status"] == "awaiting_input"
+    cached = result["cached_assessment"]
+    assert "confidence_delta" in cached
+    assert cached["confidence_delta"] == 30  # 60 - 30
+    assert "readiness_changes" in cached
+    # problem_statement went from low → high in _low_assessment
+    assert cached["readiness_changes"]["problem_statement"] == {"from": "low", "to": "high"}
+
+
+async def test_narrative_entry_appended_on_continue():
+    """Pass 2 with 'continue' appends an assessment narrative entry."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    # Pass 1: cache (with known previous_confidence for delta)
+    pass1 = await node(_make_state(previous_confidence=30.0))
+
+    # Pass 2: resume
+    with patch(_INTERRUPT_PATH, return_value="continue"):
+        result = await node(_make_state(**pass1))
+
+    assert "narrative_entries" in result
+    assert len(result["narrative_entries"]) == 1
+    entry = result["narrative_entries"][0]
+    assert entry["event"] == "assessment"
+    assert entry["confidence"] == 60
+    assert entry["confidence_delta"] == 30
+    assert "section_readiness" in entry
+    assert "gap_count" in entry
+
+
+async def test_narrative_entry_appended_on_auto_continue():
+    """Pass 2 with 'auto_continue' appends an auto_continue entry."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    pass1 = await node(_make_state(previous_confidence=30.0))
+
+    with patch(_INTERRUPT_PATH, return_value="auto_continue"):
+        result = await node(_make_state(**pass1))
+
+    assert len(result["narrative_entries"]) == 1
+    entry = result["narrative_entries"][0]
+    assert entry["event"] == "auto_continue"
+    assert entry["confidence"] == 60
+    assert "gap_count" in entry
+
+
+async def test_auto_proceed_appends_assessment_entry():
+    """Confidence >= threshold (auto-proceed) appends assessment entry."""
+    llm = StubLLMClient(responses={"Readiness ratings": _high_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    result = await node(_make_state(previous_confidence=50.0))
+
+    assert result["status"] == "proposing"
+    assert "narrative_entries" in result
+    assert len(result["narrative_entries"]) == 1
+    entry = result["narrative_entries"][0]
+    assert entry["event"] == "assessment"
+    assert entry["confidence"] == 90
+    assert entry["confidence_delta"] == 40  # 90 - 50
