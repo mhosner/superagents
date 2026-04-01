@@ -133,3 +133,59 @@ async def test_compliance_handles_unparseable_plan(tmp_path):
     assert artifact.artifact_type == "compliance_report"
     prompt = stub.calls[0][0]
     assert "Tasks extracted: 0" in prompt
+
+
+# --- B-12: compliance count parsing ---
+
+
+def test_parse_compliance_counts_standard_format():
+    """Standard summary line with all four counts."""
+    from superagents_sdlc.skills.qa.spec_compliance_checker import _parse_compliance_counts
+
+    result = _parse_compliance_counts("Total: 22 | Pass: 8 | Fail: 6 | Partial: 8")
+    assert result == {"total": 22, "pass": 8, "fail": 6, "partial": 8}
+
+
+def test_parse_compliance_counts_missing_partial():
+    """Missing partial defaults to 0."""
+    from superagents_sdlc.skills.qa.spec_compliance_checker import _parse_compliance_counts
+
+    result = _parse_compliance_counts("Total: 2 | Pass: 1 | Fail: 1")
+    assert result == {"total": 2, "pass": 1, "fail": 1, "partial": 0}
+
+
+def test_parse_compliance_counts_no_match():
+    """No structured summary returns all zeros."""
+    from superagents_sdlc.skills.qa.spec_compliance_checker import _parse_compliance_counts
+
+    result = _parse_compliance_counts("No structured summary here")
+    assert result == {"total": 0, "pass": 0, "fail": 0, "partial": 0}
+
+
+async def test_compliance_artifact_metadata_includes_counts(tmp_path):
+    """execute() embeds parsed compliance counts in artifact metadata."""
+    stub = StubLLMClient(
+        responses={
+            "## Code plan\n": (
+                "## Compliance Check\n"
+                "| Requirement | Status |\n"
+                "| Toggle | PASS |\n"
+                "| Persist | PASS |\n"
+                "| Sync | PASS |\n"
+                "| Error | FAIL |\n"
+                "| Edge | PARTIAL |\n"
+                "## Summary\n"
+                "Total: 5 | Pass: 3 | Fail: 1 | Partial: 1\n"
+                "Overall: NEEDS WORK"
+            ),
+        }
+    )
+    skill = SpecComplianceChecker(llm=stub)
+    context = _make_context(tmp_path)
+
+    artifact = await skill.execute(context)
+
+    assert artifact.metadata["total_checks"] == "5"
+    assert artifact.metadata["pass_count"] == "3"
+    assert artifact.metadata["fail_count"] == "1"
+    assert artifact.metadata["partial_count"] == "1"

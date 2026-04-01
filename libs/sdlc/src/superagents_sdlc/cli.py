@@ -19,6 +19,10 @@ if TYPE_CHECKING:
     from superagents_sdlc.workflows.orchestrator import PipelineOrchestrator
     from superagents_sdlc.workflows.result import PipelineResult
 
+# Auto-continue when confidence is more than this many points below threshold.
+AUTO_CONTINUE_MARGIN = 10
+
+
 class _SpinnerLLMClient:
     """LLMClient wrapper that shows a spinner during generate() calls.
 
@@ -446,9 +450,23 @@ async def _handle_brainstorm_interrupt(
         return response
 
     if interrupt_type == "confidence_assessment":
+        confidence = payload.get("confidence", 0)
+        threshold = payload.get("threshold", 80)
+        gaps = payload.get("gaps", [])
+        round_num = payload.get("round", 0)
+
+        # Auto-continue: skip prompt when far below threshold, but always
+        # pause on round 1 so the user gets their first look.
+        gap = threshold - confidence
+        if gap > AUTO_CONTINUE_MARGIN and round_num > 1:
+            if not quiet:
+                print(  # noqa: T201
+                    f"\n  Confidence {confidence}/{threshold}"
+                    f" — auto-continuing ({len(gaps)} gaps remaining)"
+                )
+            return "continue"
+
         if not quiet:
-            confidence = payload.get("confidence", 0)
-            threshold = payload.get("threshold", 80)
             print(f"\nConfidence Assessment: {confidence}% (threshold: {threshold}%)")  # noqa: T201
             summaries = payload.get("summaries", {})
             for section, info in payload.get("sections", {}).items():
@@ -457,10 +475,10 @@ async def _handle_brainstorm_interrupt(
                 markers = {"high": "✓", "medium": "~", "low": "✗"}
                 marker = markers.get(readiness, "?")
                 print(f"  {marker} {section}: {readiness.upper()} — {summary}")  # noqa: T201
-            if payload.get("gaps"):
+            if gaps:
                 print("\nGaps:")  # noqa: T201
-                for gap in payload["gaps"]:
-                    print(f"  - {gap['section']}: {gap['description']}")  # noqa: T201
+                for g in gaps:
+                    print(f"  - {g['section']}: {g['description']}")  # noqa: T201
             print("\n  (c)ontinue / (d)efer sections / (o)verride / (q)uit")  # noqa: T201
         response = await _async_input("> ")
         if response.strip().lower() in ("q", "quit"):
@@ -905,6 +923,19 @@ def _make_qa_callback(
         Callback function for on_qa_complete.
     """
     def on_qa(certification: str, artifacts: list[Artifact]) -> None:
+        # Extract compliance counts from compliance_report metadata
+        total_checks = 0
+        pass_count = 0
+        fail_count = 0
+        partial_count = 0
+        for a in artifacts:
+            if a.artifact_type == "compliance_report":
+                total_checks = int(a.metadata.get("total_checks", 0))
+                pass_count = int(a.metadata.get("pass_count", 0))
+                fail_count = int(a.metadata.get("fail_count", 0))
+                partial_count = int(a.metadata.get("partial_count", 0))
+                break
+
         # Extract key findings from routing manifest if available
         findings: list[dict] = []
         for a in artifacts:
@@ -921,10 +952,10 @@ def _make_qa_callback(
                 except (json.JSONDecodeError, KeyError):
                     pass
         narrative.record_qa_findings(
-            total_checks=0,
-            pass_count=0,
-            fail_count=0,
-            partial_count=0,
+            total_checks=total_checks,
+            pass_count=pass_count,
+            fail_count=fail_count,
+            partial_count=partial_count,
             key_findings=findings,
             certification=certification,
         )

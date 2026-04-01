@@ -618,3 +618,111 @@ def test_build_pipeline_command_includes_codebase_context(tmp_path):
     cmd = _build_pipeline_command(args, Path(tmp_path))
     assert "--codebase-context" in cmd
     assert "/path/ctx.md" in cmd
+
+
+# --- F-06: Auto-continue when confidence is far below threshold ---
+
+
+async def test_auto_continue_when_far_below_threshold(capsys):
+    """Auto-continue when confidence is far below threshold on round > 1."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 45,
+        "threshold": 80,
+        "round": 2,
+        "sections": {},
+        "summaries": {},
+        "gaps": [{"section": "goals", "description": "Missing success metrics"}],
+        "options": ["continue", "defer", "override"],
+    }
+    mock_input = AsyncMock(return_value="continue")
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _handle_brainstorm_interrupt(payload, quiet=False)
+
+    assert result == "continue"
+    mock_input.assert_not_called()
+    captured = capsys.readouterr()
+    assert "auto-continuing" in captured.out.lower()
+    assert "45" in captured.out
+    assert "80" in captured.out
+
+
+async def test_no_auto_continue_on_round_1(capsys):
+    """Round 1 always shows the full prompt, even when far below threshold."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 45,
+        "threshold": 80,
+        "round": 1,
+        "sections": {},
+        "summaries": {},
+        "gaps": [{"section": "goals", "description": "Missing success metrics"}],
+        "options": ["continue", "defer", "override"],
+    }
+    mock_input = AsyncMock(return_value="c")
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _handle_brainstorm_interrupt(payload, quiet=False)
+
+    assert result == "continue"
+    mock_input.assert_called()
+
+
+async def test_no_auto_continue_when_close_to_threshold(capsys):
+    """When gap <= margin, always prompt the user."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 72,
+        "threshold": 80,
+        "round": 3,
+        "sections": {},
+        "summaries": {},
+        "gaps": [{"section": "goals", "description": "Minor gap"}],
+        "options": ["continue", "defer", "override"],
+    }
+    mock_input = AsyncMock(return_value="c")
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _handle_brainstorm_interrupt(payload, quiet=False)
+
+    assert result == "continue"
+    mock_input.assert_called()
+
+
+async def test_auto_continue_exact_margin_boundary(capsys):
+    """At exactly the margin (gap == 10), user is still prompted (gap > margin, not >=)."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 70,
+        "threshold": 80,
+        "round": 2,
+        "sections": {},
+        "summaries": {},
+        "gaps": [{"section": "goals", "description": "Some gap"}],
+        "options": ["continue", "defer", "override"],
+    }
+    mock_input = AsyncMock(return_value="c")
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _handle_brainstorm_interrupt(payload, quiet=False)
+
+    assert result == "continue"
+    mock_input.assert_called()
+
+
+async def test_auto_continue_quiet_mode(capsys):
+    """quiet=True returns 'continue' without printing when far below threshold."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 45,
+        "threshold": 80,
+        "round": 2,
+        "sections": {},
+        "summaries": {},
+        "gaps": [{"section": "goals", "description": "Missing success metrics"}],
+        "options": ["continue", "defer", "override"],
+    }
+    mock_input = AsyncMock(return_value="continue")
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _handle_brainstorm_interrupt(payload, quiet=True)
+
+    assert result == "continue"
+    captured = capsys.readouterr()
+    assert captured.out == ""

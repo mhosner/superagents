@@ -6,6 +6,7 @@ Structured PASS/FAIL per requirement with exact spec text citations.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from superagents_sdlc.skills.base import Artifact, BaseSkill, SkillValidationError
@@ -45,6 +46,27 @@ For each user story and spec requirement:
 2. Summary: total checks, pass count, fail count, partial count
 3. Overall assessment: PASS / NEEDS WORK / FAIL
 """
+
+
+def _parse_compliance_counts(text: str) -> dict[str, int]:
+    """Extract compliance counts from LLM response text.
+
+    Looks for patterns like ``Total: 2``, ``Pass: 1``, ``Fail: 1``,
+    ``Partial: 0`` in the response.
+
+    Args:
+        text: Raw LLM response containing a summary line.
+
+    Returns:
+        Dict with total, pass, fail, partial keys. Defaults to 0
+        for any count not found.
+    """
+    counts: dict[str, int] = {"total": 0, "pass": 0, "fail": 0, "partial": 0}
+    for key in counts:
+        match = re.search(rf"(?i){key}\s*[:=]\s*(\d+)", text)
+        if match:
+            counts[key] = int(match.group(1))
+    return counts
 
 
 class SpecComplianceChecker(BaseSkill):
@@ -119,8 +141,15 @@ class SpecComplianceChecker(BaseSkill):
         output_path = context.artifact_dir / "compliance_report.md"
         output_path.write_text(response)
 
+        counts = _parse_compliance_counts(response)
         return Artifact(
             path=str(output_path),
             artifact_type="compliance_report",
-            metadata={"framework": "spec_compliance"},
+            metadata={
+                "framework": "spec_compliance",
+                "total_checks": str(counts["total"]),
+                "pass_count": str(counts["pass"]),
+                "fail_count": str(counts["fail"]),
+                "partial_count": str(counts["partial"]),
+            },
         )

@@ -288,6 +288,36 @@ def test_full_narrative_flow(tmp_path: Path):
     assert pass3_pos < feedback_pos < routing_pos < final_pos
 
 
+def test_qa_callback_reads_compliance_counts(tmp_path: Path):
+    """_make_qa_callback reads counts from compliance_report metadata, not zeros."""
+    from superagents_sdlc.cli import _make_qa_callback
+
+    writer = NarrativeWriter(tmp_path, "test")
+    writer.start_pass(1, "Initial Run")
+    callback = _make_qa_callback(narrative=writer, quiet=True)
+
+    artifacts = [
+        Artifact(
+            path="qa/compliance_report.md",
+            artifact_type="compliance_report",
+            metadata={
+                "framework": "spec_compliance",
+                "total_checks": "22",
+                "pass_count": "8",
+                "fail_count": "6",
+                "partial_count": "8",
+            },
+        ),
+    ]
+    callback("NEEDS WORK", artifacts)
+
+    content = (tmp_path / "pipeline_narrative.md").read_text()
+    assert "22 checks" in content
+    assert "8 PASS" in content
+    assert "6 FAIL" in content
+    assert "8 PARTIAL" in content
+
+
 def test_narrative_records_unroutable_findings(tmp_path: Path):
     writer = NarrativeWriter(tmp_path, "test")
     writer.record_unroutable_findings({
