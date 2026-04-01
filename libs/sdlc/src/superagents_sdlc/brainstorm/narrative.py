@@ -7,6 +7,9 @@ no LLM writes narrative content.
 
 from __future__ import annotations
 
+_DESIGN_EVENTS = {"approach_selected", "section_approved", "section_revised"}
+_BRIEF_EVENTS = {"brief_approved", "brief_revised"}
+
 
 def render_narrative_markdown(entries: list[dict], idea: str) -> str:
     """Render narrative entries to a markdown document.
@@ -27,9 +30,6 @@ def render_narrative_markdown(entries: list[dict], idea: str) -> str:
     exploration: list[dict] = []
     design: list[dict] = []
     brief: list[dict] = []
-
-    _DESIGN_EVENTS = {"approach_selected", "section_approved", "section_revised"}
-    _BRIEF_EVENTS = {"brief_approved", "brief_revised"}
 
     for entry in entries:
         event = entry.get("event", "")
@@ -72,7 +72,7 @@ def _format_delta(delta: int | None) -> str:
     return f"+{delta}" if delta >= 0 else str(delta)
 
 
-def _render_exploration(entries: list[dict], lines: list[str]) -> None:
+def _render_exploration(entries: list[dict], lines: list[str]) -> None:  # noqa: C901, PLR0912
     """Render exploration-phase entries with round headers.
 
     Args:
@@ -100,7 +100,10 @@ def _render_exploration(entries: list[dict], lines: list[str]) -> None:
             delta = entry.get("confidence_delta")
             gap_count = entry.get("gap_count", 0)
             delta_str = f" ({_format_delta(delta)})" if delta is not None else ""
-            lines.append(f"**Assessment**: Confidence {confidence}%{delta_str}. {gap_count} gaps remaining.")
+            lines.append(
+                f"**Assessment**: Confidence {confidence}%{delta_str}."
+                f" {gap_count} gaps remaining."
+            )
 
             readiness_changes = entry.get("readiness_changes", {})
             if readiness_changes:

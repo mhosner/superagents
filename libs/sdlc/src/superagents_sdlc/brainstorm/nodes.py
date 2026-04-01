@@ -271,8 +271,8 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
         # Append narrative entries for each answered question
         new_round = state.get("round_number", 0) + 1
         narrative = list(state.get("narrative_entries", []))
-        for entry in updated[len(state["transcript"]):]:
-            narrative.append({
+        narrative.extend(
+            {
                 "event": "question_answered",
                 "round": new_round,
                 "confidence": state.get("confidence_score", 0),
@@ -280,7 +280,9 @@ def make_generate_question_node(llm: LLMClient) -> Callable[..., Any]:
                 "question_text": entry.get("question", "?"),
                 "answer_text": entry.get("answer", ""),
                 "options": [],
-            })
+            }
+            for entry in updated[len(state["transcript"]):]
+        )
 
         return {
             "transcript": updated,
@@ -486,8 +488,17 @@ def make_synthesize_brief_node(llm: LLMClient) -> Callable[..., Any]:
         })
 
         if revision_count >= MAX_BRIEF_REVISIONS:
-            return {"brief": brief, "status": "complete", "brief_revision_count": revision_count, "narrative_entries": narrative}
+            return {
+                "brief": brief,
+                "status": "complete",
+                "brief_revision_count": revision_count,
+                "narrative_entries": narrative,
+            }
 
-        return {"brief_revision_count": revision_count, "status": "synthesizing", "narrative_entries": narrative}
+        return {
+            "brief_revision_count": revision_count,
+            "status": "synthesizing",
+            "narrative_entries": narrative,
+        }
 
     return synthesize_brief

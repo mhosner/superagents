@@ -118,7 +118,7 @@ def _build_section_summaries(
     return summaries
 
 
-def make_estimate_confidence_node(
+def make_estimate_confidence_node(  # noqa: C901, PLR0915
     llm: LLMClient,
     *,
     threshold: int = DEFAULT_CONFIDENCE_THRESHOLD,
@@ -140,14 +140,13 @@ def make_estimate_confidence_node(
         changes: dict[str, dict[str, str]] = {}
         for section, info in new.items():
             new_r = info.get("readiness", "?")
-            old_r = "?"
-            if section in old and old[section]:
-                old_r = old[section].get("readiness", "?")
+            old_info = old.get(section)
+            old_r = old_info.get("readiness", "?") if old_info else "?"
             if new_r != old_r:
                 changes[section] = {"from": old_r, "to": new_r}
         return changes
 
-    async def estimate_confidence(state: BrainstormState) -> dict[str, Any]:
+    async def estimate_confidence(state: BrainstormState) -> dict[str, Any]:  # noqa: C901, PLR0911, PLR0915
         """Assess section readiness and route to questions or approaches.
 
         Uses a two-pass pattern to avoid double LLM execution on
