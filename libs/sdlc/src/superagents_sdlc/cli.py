@@ -725,12 +725,28 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
     if args.quiet:
         return 0
 
+    # Drain any buffered stdin before the handoff prompt. The brainstorm's
+    # interrupt loop may leave trailing newlines in the buffer from
+    # _handle_brainstorm_interrupt calls, which _async_input would consume
+    # instead of waiting for fresh user input.
+    import select  # noqa: PLC0415
+
+    while select.select([sys.stdin], [], [], 0)[0]:
+        sys.stdin.readline()
+
     print("\n  (p)ipeline — send brief to idea-to-code pipeline")  # noqa: T201
     print("  (d)one — exit")  # noqa: T201
     try:
         choice = (await _async_input("\n> ")).strip().lower()
     except EOFError:
         choice = "d"
+
+    # Re-prompt once on empty input (accidental Enter or residual buffer)
+    if not choice:
+        try:
+            choice = (await _async_input("  Please enter (p) or (d): ")).strip().lower()
+        except EOFError:
+            choice = "d"
 
     if choice not in ("p", "pipeline"):
         return 0

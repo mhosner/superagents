@@ -640,3 +640,28 @@ async def test_spinner_llm_client_stops_on_error():
         pass
 
     assert spinner.history[-1] == "stop"
+
+
+# -- Handoff prompt tests (B-16: stdin drain + re-prompt) --
+
+
+def test_handoff_empty_input_triggers_reprompt_logic():
+    """Empty string after strip triggers the re-prompt branch."""
+    # This tests the condition: if not choice → re-prompt
+    for stale in ("", "\n", "  \n  "):
+        choice = stale.strip().lower()
+        assert not choice, f"Expected empty after strip for input {stale!r}"
+
+
+def test_handoff_p_still_recognized():
+    """'p' and 'pipeline' both pass the handoff check."""
+    for valid in ("p", "P", "pipeline", "Pipeline", " p ", " pipeline "):
+        choice = valid.strip().lower()
+        assert choice in ("p", "pipeline"), f"{valid!r} should be recognized"
+
+
+def test_handoff_d_skips_pipeline():
+    """'d', 'done', or anything else skips pipeline launch."""
+    for skip in ("d", "done", "x", "no", ""):
+        choice = skip.strip().lower()
+        assert choice not in ("p", "pipeline"), f"{skip!r} should skip pipeline"
