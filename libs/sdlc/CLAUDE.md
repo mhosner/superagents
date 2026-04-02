@@ -7,15 +7,14 @@
 
 ## Vision
 
-Build an agentic software development lifecycle framework that combines:
+An agentic software development lifecycle framework that combines:
 - **BMAD-style SDLC personas** as the enterprise-legible governance layer
-- **Manna Ray PM skills** as the domain implementation behind persona facades
 - **Superpowers TDD methodology** as the engineering execution engine
-- **Deep Agents SDK** as the runtime and orchestrator
 - **A2A Protocol** as the inter-agent communication contract
 - **OpenTelemetry** as the observability backbone from day one
+- **LangGraph** for HITL brainstorm subgraph with interrupt/resume
 
-The goal: an adoption-gradient framework where enterprise teams can dial autonomy from "agents assist, humans decide" to "agents execute, humans approve at boundaries" — with every persona mapping to a real human role that owns the output.
+467 tests, all passing. The goal: an adoption-gradient framework where enterprise teams can dial autonomy from "agents assist, humans decide" to "agents execute, humans approve at boundaries" — with every persona mapping to a real human role that owns the output.
 
 ## Architecture overview
 
@@ -31,16 +30,14 @@ The goal: an adoption-gradient framework where enterprise teams can dial autonom
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬─────┘  │
 │       │              │              │               │       │
 │  ┌────▼─────┐  ┌────▼─────┐  ┌────▼─────┐  ┌─────▼─────┐  │
-│  │Manna Ray │  │ Deep     │  │Superpwr  │  │ Layered   │  │
-│  │PM Skills │  │ Agents   │  │TDD Cycle │  │ Testing   │  │
-│  │(31 skills│  │ Skills   │  │(RED-GRN- │  │ (accept + │  │
-│  │ ported)  │  │          │  │ REFACTOR)│  │  unit)    │  │
+│  │ PM Skills│  │  Arch    │  │  Code    │  │ QA Skills │  │
+│  │(PRD,     │  │  Skills  │  │ Planner  │  │(Compliance│  │
+│  │ Stories, │  │(Spec,    │  │(Phased   │  │ Validation│  │
+│  │ Backlog) │  │ Planner) │  │ TDD)     │  │ Routing)  │  │
 │  └──────────┘  └──────────┘  └──────────┘  └───────────┘  │
 │                                                             │
 ├─────────────────────────────────────────────────────────────┤
 │              A2A Protocol (handoffs + discovery)             │
-├─────────────────────────────────────────────────────────────┤
-│              Deep Agents SDK (orchestration runtime)         │
 ├─────────────────────────────────────────────────────────────┤
 │              OpenTelemetry (traces, spans, metrics)          │
 └─────────────────────────────────────────────────────────────┘
@@ -50,14 +47,12 @@ The goal: an adoption-gradient framework where enterprise teams can dial autonom
 
 Each persona maps to a human role in a traditional enterprise org. The human in that role is the approval authority at their autonomy level.
 
-| Persona | Human Owner | Manna Ray Skills | Superpowers Phase |
-|---------|-------------|-----------------|-------------------|
-| Product Manager | PM / Product Owner | prd-generator, prioritization-engine, roadmap-builder, user-story-writer, backlog-prioritizer | brainstorming |
-| Architect | Tech Lead / Principal Eng | technical-spec-writer, tech-debt-evaluator | brainstorming, writing-plans |
-| Developer | Dev Team | (code generation) | TDD cycle, subagent-driven-development |
-| QA | QA Lead | ab-test-designer, ab-test-analyzer, funnel-analyzer | test-driven-development, verification |
-| Scrum Master | Scrum Master / EM | quarterly-planning-template, weekly-plan, daily-plan | executing-plans, finishing-a-development-branch |
-| Stakeholder Proxy | Product Owner | stakeholder-simulator, executive-update-generator | requesting-code-review |
+| Persona | Human Owner | Skills (implemented) |
+| ------- | ----------- | ------------------- |
+| Product Manager | PM / Product Owner | PrdGenerator, PrioritizationEngine, UserStoryWriter |
+| Architect | Tech Lead | TechSpecWriter, ImplementationPlanner |
+| Developer | Dev Team | CodePlanner (phased TDD format) |
+| QA | QA Lead | SpecComplianceChecker, ValidationReportGenerator, FindingsRouter |
 
 ## Autonomy levels
 
@@ -333,7 +328,6 @@ with `pip install superagents-sdlc[anthropic]` for real LLM calls.
 - [Deep Agents SDK](https://github.com/langchain-ai/deepagents) — Runtime and orchestration
 - [Superpowers](https://github.com/obra/superpowers) — TDD workflow methodology
 - [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) — Persona model inspiration
-- [Manna Ray](https://github.com/mhosner/manna_ray) — PM skill definitions to port
+- [MySecond.ai Skills](https://www.mysecond.ai/skills) — PM skill definitions
 - [Strangler Fig Newton](https://github.com/mhosner/strangler_fig_newton) — Legacy migration plugin
 - [A2A Protocol](https://github.com/a2aproject/A2A) — Agent-to-agent communication
-- [OpenAI Agents Handoffs](https://openai.github.io/openai-agents-python/handoffs/) — Handoff pattern reference
