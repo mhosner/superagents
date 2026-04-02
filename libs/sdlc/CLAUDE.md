@@ -14,7 +14,7 @@ An agentic software development lifecycle framework that combines:
 - **OpenTelemetry** as the observability backbone from day one
 - **LangGraph** for HITL brainstorm subgraph with interrupt/resume
 
-467 tests, all passing. The goal: an adoption-gradient framework where enterprise teams can dial autonomy from "agents assist, humans decide" to "agents execute, humans approve at boundaries" — with every persona mapping to a real human role that owns the output.
+475 tests, all passing. The goal: an adoption-gradient framework where enterprise teams can dial autonomy from "agents assist, humans decide" to "agents execute, humans approve at boundaries" — with every persona mapping to a real human role that owns the output.
 
 ## Architecture overview
 

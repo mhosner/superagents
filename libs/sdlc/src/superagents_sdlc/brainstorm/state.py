@@ -31,6 +31,7 @@ class BrainstormState(TypedDict):
         previous_confidence: Confidence score from prior iteration.
         section_summaries: Code-assembled summaries from IdeaMemory entries.
         cached_assessment: Cached confidence assessment to prevent double LLM execution.
+        cached_approaches: Cached LLM-generated approaches to prevent re-execution on resume.
         narrative_entries: Structured narrative entries accumulated during brainstorm.
     """
 
@@ -56,4 +57,5 @@ class BrainstormState(TypedDict):
     previous_confidence: float
     section_summaries: dict
     cached_assessment: dict
+    cached_approaches: list[dict]
     narrative_entries: list[dict]

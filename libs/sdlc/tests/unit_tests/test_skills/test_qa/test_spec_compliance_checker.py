@@ -189,3 +189,53 @@ async def test_compliance_artifact_metadata_includes_counts(tmp_path):
     assert artifact.metadata["pass_count"] == "3"
     assert artifact.metadata["fail_count"] == "1"
     assert artifact.metadata["partial_count"] == "1"
+
+
+# -- _parse_compliance_counts format tests (B-17) --
+
+
+def test_parse_counts_pipe_separated():
+    from superagents_sdlc.skills.qa.spec_compliance_checker import _parse_compliance_counts
+
+    text = "## Summary\nTotal: 5 | Pass: 3 | Fail: 1 | Partial: 1\nOverall: NEEDS WORK"
+    counts = _parse_compliance_counts(text)
+    assert counts == {"total": 5, "pass": 3, "fail": 1, "partial": 1}
+
+
+def test_parse_counts_prose_style():
+    from superagents_sdlc.skills.qa.spec_compliance_checker import _parse_compliance_counts
+
+    text = "22 checks — 8 PASS, 6 FAIL, 8 PARTIAL"
+    counts = _parse_compliance_counts(text)
+    assert counts == {"total": 22, "pass": 8, "fail": 6, "partial": 8}
+
+
+def test_parse_counts_markdown_bold():
+    from superagents_sdlc.skills.qa.spec_compliance_checker import _parse_compliance_counts
+
+    text = "| **TOTAL** | **106** | **97** | **3** | **6** |"
+    counts = _parse_compliance_counts(text)
+    assert counts == {"total": 106, "pass": 97, "fail": 3, "partial": 6}
+
+
+def test_parse_counts_markdown_table_with_headers():
+    """Real format from a spec-from-prd run: TOTAL row in a table with
+    columns Total, Pass, Fail, Partial."""
+    from superagents_sdlc.skills.qa.spec_compliance_checker import _parse_compliance_counts
+
+    text = (
+        "| Requirement | Total | Pass | Fail | Partial |\n"
+        "|---|---|---|---|---|\n"
+        "| SL-01 | 8 | 7 | 1 | 0 |\n"
+        "| **TOTAL** | **106** | **97** | **3** | **6** |\n"
+    )
+    counts = _parse_compliance_counts(text)
+    assert counts == {"total": 106, "pass": 97, "fail": 3, "partial": 6}
+
+
+def test_parse_counts_no_match():
+    from superagents_sdlc.skills.qa.spec_compliance_checker import _parse_compliance_counts
+
+    text = "No structured summary here at all."
+    counts = _parse_compliance_counts(text)
+    assert counts == {"total": 0, "pass": 0, "fail": 0, "partial": 0}

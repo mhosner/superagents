@@ -144,6 +144,7 @@ def make_explore_context_node() -> Callable[..., Any]:
             "previous_confidence": 0.0,
             "section_summaries": {},
             "cached_assessment": {},
+            "cached_approaches": [],
             "narrative_entries": [],
         }
 
@@ -307,18 +308,32 @@ def make_propose_approaches_node(llm: LLMClient) -> Callable[..., Any]:
     """
 
     async def propose_approaches(state: BrainstormState) -> dict[str, Any]:
-        """Generate approaches and interrupt for human selection."""
-        # NOTE: On resume, this LLM call re-executes. Acceptable cost for simplicity.
-        cached_prefix = _build_brainstorm_cached_prefix(
-            idea=state["idea"],
-            product_context=state["product_context"],
-            codebase_context=state["codebase_context"],
-        )
-        prompt = APPROACHES_PROMPT.format(
-            idea_memory=_idea_memory_from_state(state).format_for_prompt(),
-        )
-        raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)
-        approaches = _extract_json(raw)
+        """Generate approaches and interrupt for human selection.
+
+        Uses two-pass cache pattern (same as estimate_confidence):
+        Pass 1 — LLM generates approaches, caches them, returns without interrupt.
+        Pass 2 — Reads cache, interrupts for selection, clears cache.
+        This prevents LLM re-execution on resume and ensures the narrative
+        records the exact approach names the user saw.
+        """
+        cached = state.get("cached_approaches", [])
+
+        if not cached:
+            # Pass 1: call LLM, cache approaches, return
+            cached_prefix = _build_brainstorm_cached_prefix(
+                idea=state["idea"],
+                product_context=state["product_context"],
+                codebase_context=state["codebase_context"],
+            )
+            prompt = APPROACHES_PROMPT.format(
+                idea_memory=_idea_memory_from_state(state).format_for_prompt(),
+            )
+            raw = await llm.generate(prompt, system=BRAINSTORM_SYSTEM, cached_prefix=cached_prefix)
+            approaches = _extract_json(raw)
+            return {"cached_approaches": approaches}
+
+        # Pass 2: read cache, interrupt for selection, clear cache
+        approaches = cached
 
         selected = interrupt({
             "type": "approaches",
@@ -341,6 +356,7 @@ def make_propose_approaches_node(llm: LLMClient) -> Callable[..., Any]:
             "status": "designing",
             "current_section_idx": 0,
             "narrative_entries": narrative,
+            "cached_approaches": [],
         }
 
     return propose_approaches

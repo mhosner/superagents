@@ -90,6 +90,7 @@ def _make_state(**overrides):
         "previous_confidence": 0.0,
         "section_summaries": {},
         "cached_assessment": {},
+        "cached_approaches": [],
         "narrative_entries": [],
     }
     base.update(overrides)

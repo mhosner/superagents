@@ -20,6 +20,7 @@ from superagents_sdlc.brainstorm.state import BrainstormState
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
+
     from superagents_sdlc.skills.llm import LLMClient
 
 
@@ -77,8 +78,18 @@ def build_brainstorm_graph(
         ["propose_approaches", "generate_question"],
     )
 
-    # After approach selection → design sections
-    builder.add_edge("propose_approaches", "generate_design_section")
+    # After approach selection → loop back for pass 2 or proceed to design
+    def route_after_approaches(state: BrainstormState) -> str:
+        """Route based on two-pass cache: loop if cached, proceed if cleared."""
+        if state.get("cached_approaches"):
+            return "propose_approaches"
+        return "generate_design_section"
+
+    builder.add_conditional_edges(
+        "propose_approaches",
+        route_after_approaches,
+        ["propose_approaches", "generate_design_section"],
+    )
 
     # Conditional: after confidence estimation
     def route_after_confidence(state: BrainstormState) -> str:

@@ -51,8 +51,9 @@ For each user story and spec requirement:
 def _parse_compliance_counts(text: str) -> dict[str, int]:
     """Extract compliance counts from LLM response text.
 
-    Looks for patterns like ``Total: 2``, ``Pass: 1``, ``Fail: 1``,
-    ``Partial: 0`` in the response.
+    Tries multiple patterns in priority order to handle common LLM output
+    variations: ``Total: N | Pass: N``, prose like ``22 checks — 8 PASS``,
+    markdown bold ``**TOTAL** | **106**``, and table rows.
 
     Args:
         text: Raw LLM response containing a summary line.
@@ -62,10 +63,42 @@ def _parse_compliance_counts(text: str) -> dict[str, int]:
         for any count not found.
     """
     counts: dict[str, int] = {"total": 0, "pass": 0, "fail": 0, "partial": 0}
+
+    # Pattern 1: "Key: N" or "Key = N" (with optional markdown bold)
     for key in counts:
-        match = re.search(rf"(?i){key}\s*[:=]\s*(\d+)", text)
+        match = re.search(rf"(?i)\*?\*?{key}\*?\*?\s*[:=]\s*\*?\*?(\d+)\*?\*?", text)
         if match:
             counts[key] = int(match.group(1))
+
+    if any(counts.values()):
+        return counts
+
+    # Pattern 2: Markdown table TOTAL row — | **TOTAL** | **N** | **N** | **N** | **N** |
+    total_row = re.search(
+        r"\|\s*\*?\*?TOTAL\*?\*?\s*\|"
+        r"\s*\*?\*?(\d+)\*?\*?\s*\|"
+        r"\s*\*?\*?(\d+)\*?\*?\s*\|"
+        r"\s*\*?\*?(\d+)\*?\*?\s*\|"
+        r"\s*\*?\*?(\d+)\*?\*?\s*\|",
+        text,
+        re.IGNORECASE,
+    )
+    if total_row:
+        counts["total"] = int(total_row.group(1))
+        counts["pass"] = int(total_row.group(2))
+        counts["fail"] = int(total_row.group(3))
+        counts["partial"] = int(total_row.group(4))
+        return counts
+
+    # Pattern 3: Prose — "N checks" + "N PASS" + "N FAIL" + "N PARTIAL"
+    total_match = re.search(r"(\d+)\s+checks", text, re.IGNORECASE)
+    if total_match:
+        counts["total"] = int(total_match.group(1))
+    for key in ("pass", "fail", "partial"):
+        match = re.search(rf"(\d+)\s+{key}", text, re.IGNORECASE)
+        if match:
+            counts[key] = int(match.group(1))
+
     return counts
 
 

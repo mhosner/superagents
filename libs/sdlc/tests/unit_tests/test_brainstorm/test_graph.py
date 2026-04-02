@@ -37,6 +37,7 @@ def _initial_state() -> dict:
         "previous_confidence": 0.0,
         "section_summaries": {},
         "cached_assessment": {},
+        "cached_approaches": [],
     }
 
 

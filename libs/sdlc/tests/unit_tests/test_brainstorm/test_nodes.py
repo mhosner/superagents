@@ -52,6 +52,7 @@ def _make_state(**overrides: object) -> dict:
         "previous_confidence": 0.0,
         "section_summaries": {},
         "cached_assessment": {},
+        "cached_approaches": [],
         "narrative_entries": [],
     }
     base.update(overrides)
@@ -65,7 +66,7 @@ def _raise_interrupt(value):
 def test_brainstorm_state_is_typeddict():
     state: BrainstormState = _make_state()  # type: ignore[assignment]
     assert state["status"] == "exploring"
-    assert len(state) == 23
+    assert len(state) == 24
 
 
 async def test_explore_context_initializes_state():
@@ -164,32 +165,91 @@ async def test_generate_question_interrupt_payload_structure():
     assert captured["confidence"] == 45
 
 
-async def test_propose_approaches_interrupts():
+async def test_propose_approaches_pass1_caches_without_interrupt():
+    """Pass 1: LLM called, approaches cached, no interrupt."""
     llm = StubLLMClient(responses={
         "Propose 2-3": '[{"name": "Simple", "description": "d", "tradeoffs": "t"}]',
     })
     node = make_propose_approaches_node(llm)
 
-    with (
-        patch(_INTERRUPT_PATH, side_effect=_raise_interrupt),
-        pytest.raises(GraphInterrupt),
-    ):
-        await node(_make_state(status="proposing"))
+    result = await node(_make_state(status="proposing"))
+
+    assert len(result["cached_approaches"]) == 1
+    assert result["cached_approaches"][0]["name"] == "Simple"
+    assert "selected_approach" not in result
+    assert len(llm.calls) == 1
 
 
-async def test_propose_approaches_returns_selection_on_resume():
-    llm = StubLLMClient(responses={
-        "Propose 2-3": '[{"name": "Simple", "description": "d", "tradeoffs": "t"}]',
-    })
+async def test_propose_approaches_pass2_reads_cache_and_interrupts():
+    """Pass 2: reads cache, interrupts, returns selection, clears cache."""
+    llm = StubLLMClient(responses={})
     node = make_propose_approaches_node(llm)
 
+    cached = [{"name": "Simple", "description": "d", "tradeoffs": "t"}]
     with patch(_INTERRUPT_PATH, return_value="Simple"):
-        result = await node(_make_state(status="proposing"))
+        result = await node(_make_state(
+            status="proposing",
+            cached_approaches=cached,
+        ))
 
     assert result["selected_approach"] == "Simple"
     assert result["status"] == "designing"
     assert result["current_section_idx"] == 0
-    assert len(result["approaches"]) == 1
+    assert result["cached_approaches"] == []
+    assert len(llm.calls) == 0
+
+
+async def test_propose_approaches_pass2_interrupts_with_cached_data():
+    """Pass 2: interrupt receives cached approaches, not re-generated ones."""
+    llm = StubLLMClient(responses={})
+    node = make_propose_approaches_node(llm)
+
+    cached = [
+        {"name": "Original A", "description": "d", "tradeoffs": "t"},
+        {"name": "Original B", "description": "d", "tradeoffs": "t"},
+    ]
+    interrupt_payloads = []
+
+    def capture_interrupt(value):
+        interrupt_payloads.append(value)
+        return "Original A"
+
+    with patch(_INTERRUPT_PATH, side_effect=capture_interrupt):
+        await node(_make_state(status="proposing", cached_approaches=cached))
+
+    assert len(interrupt_payloads) == 1
+    names = [a["name"] for a in interrupt_payloads[0]["approaches"]]
+    assert names == ["Original A", "Original B"]
+
+
+async def test_propose_approaches_narrative_uses_cached_names():
+    """Narrative entry records cached approach names, not re-generated ones."""
+    llm = StubLLMClient(responses={})
+    node = make_propose_approaches_node(llm)
+
+    cached = [{"name": "Cached Name", "description": "d", "tradeoffs": "t"}]
+    with patch(_INTERRUPT_PATH, return_value="Cached Name"):
+        result = await node(_make_state(
+            status="proposing",
+            cached_approaches=cached,
+        ))
+
+    entry = result["narrative_entries"][-1]
+    assert entry["event"] == "approach_selected"
+    assert entry["approach_name"] == "Cached Name"
+    assert entry["approaches_offered"] == ["Cached Name"]
+
+
+async def test_propose_approaches_llm_not_called_on_pass2():
+    """LLM is never invoked on pass 2."""
+    llm = StubLLMClient(responses={})
+    node = make_propose_approaches_node(llm)
+
+    cached = [{"name": "A", "description": "d", "tradeoffs": "t"}]
+    with patch(_INTERRUPT_PATH, return_value="A"):
+        await node(_make_state(status="proposing", cached_approaches=cached))
+
+    assert len(llm.calls) == 0
 
 
 async def test_generate_design_section_approve():
@@ -947,17 +1007,16 @@ async def test_question_answered_appends_narrative_entry():
 
 
 async def test_approach_selected_appends_narrative_entry():
-    """propose_approaches appends an approach_selected narrative entry."""
-    llm = StubLLMClient(responses={
-        "Propose 2-3": json.dumps([
-            {"name": "Simple", "description": "d", "tradeoffs": "t"},
-            {"name": "Complex", "description": "d2", "tradeoffs": "t2"},
-        ]),
-    })
+    """propose_approaches pass 2 appends an approach_selected narrative entry."""
+    llm = StubLLMClient(responses={})
     node = make_propose_approaches_node(llm)
 
+    cached = [
+        {"name": "Simple", "description": "d", "tradeoffs": "t"},
+        {"name": "Complex", "description": "d2", "tradeoffs": "t2"},
+    ]
     with patch(_INTERRUPT_PATH, return_value="Simple"):
-        result = await node(_make_state(status="proposing"))
+        result = await node(_make_state(status="proposing", cached_approaches=cached))
 
     assert "narrative_entries" in result
     entries = result["narrative_entries"]
