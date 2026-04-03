@@ -1890,13 +1890,30 @@ async def _guided_new_brainstorm(settings: dict[str, str | None]) -> int:
         print("  No idea entered.")  # noqa: T201
         return 0
 
+    # Optional codebase context file
+    codebase_context = None
+    print("  Codebase context file? (path to CLAUDE.md or similar, Enter to skip)")  # noqa: T201
+    while True:
+        try:
+            ctx_path = (await _async_input("> ")).strip()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+
+        if not ctx_path:
+            break
+        if Path(ctx_path).exists():
+            codebase_context = ctx_path
+            break
+        print(f"  File not found: {ctx_path}")  # noqa: T201
+        print("  Try again, or Enter to skip.")  # noqa: T201
+
     # Construct args namespace with defaults
     args = argparse.Namespace(
         command="brainstorm",
         idea=idea,
         output_dir=None,  # _run_brainstorm will use default: superagents-output/{slug}
         context_dir=None,
-        codebase_context=None,
+        codebase_context=codebase_context,
         model=settings["model"],
         fast_model=settings["fast_model"],
         max_tokens=int(settings["max_tokens"] or "16384"),

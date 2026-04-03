@@ -1259,3 +1259,100 @@ async def test_build_sidekick_context_with_state():
     )
     assert ctx.selected_approach == "Microservices"
     assert ctx.product_context == "SaaS platform"
+
+
+# -- Guided new brainstorm codebase context tests --
+
+
+async def test_guided_new_brainstorm_with_codebase_context(tmp_path):
+    from unittest.mock import AsyncMock, patch
+
+    from superagents_sdlc.cli import _guided_new_brainstorm
+
+    ctx_file = tmp_path / "CLAUDE.md"
+    ctx_file.write_text("# Codebase")
+
+    mock_input = AsyncMock(side_effect=["My idea", str(ctx_file)])
+    captured_args = []
+
+    async def fake_run_brainstorm(args):
+        captured_args.append(args)
+        return 0
+
+    with (
+        patch("superagents_sdlc.cli._async_input", mock_input),
+        patch("superagents_sdlc.cli._run_brainstorm", fake_run_brainstorm),
+    ):
+        await _guided_new_brainstorm({"model": "m", "fast_model": None, "max_tokens": "16384"})
+
+    assert len(captured_args) == 1
+    assert captured_args[0].codebase_context == str(ctx_file)
+
+
+async def test_guided_new_brainstorm_skip_codebase_context():
+    from unittest.mock import AsyncMock, patch
+
+    from superagents_sdlc.cli import _guided_new_brainstorm
+
+    mock_input = AsyncMock(side_effect=["My idea", ""])
+    captured_args = []
+
+    async def fake_run_brainstorm(args):
+        captured_args.append(args)
+        return 0
+
+    with (
+        patch("superagents_sdlc.cli._async_input", mock_input),
+        patch("superagents_sdlc.cli._run_brainstorm", fake_run_brainstorm),
+    ):
+        await _guided_new_brainstorm({"model": "m", "fast_model": None, "max_tokens": "16384"})
+
+    assert len(captured_args) == 1
+    assert captured_args[0].codebase_context is None
+
+
+async def test_guided_new_brainstorm_invalid_path_retries(tmp_path):
+    from unittest.mock import AsyncMock, patch
+
+    from superagents_sdlc.cli import _guided_new_brainstorm
+
+    valid_file = tmp_path / "CLAUDE.md"
+    valid_file.write_text("# Codebase")
+
+    mock_input = AsyncMock(side_effect=["My idea", "/nonexistent/path.md", str(valid_file)])
+    captured_args = []
+
+    async def fake_run_brainstorm(args):
+        captured_args.append(args)
+        return 0
+
+    with (
+        patch("superagents_sdlc.cli._async_input", mock_input),
+        patch("superagents_sdlc.cli._run_brainstorm", fake_run_brainstorm),
+    ):
+        await _guided_new_brainstorm({"model": "m", "fast_model": None, "max_tokens": "16384"})
+
+    assert len(captured_args) == 1
+    assert captured_args[0].codebase_context == str(valid_file)
+
+
+async def test_guided_new_brainstorm_invalid_path_then_skip():
+    from unittest.mock import AsyncMock, patch
+
+    from superagents_sdlc.cli import _guided_new_brainstorm
+
+    mock_input = AsyncMock(side_effect=["My idea", "/nonexistent/path.md", ""])
+    captured_args = []
+
+    async def fake_run_brainstorm(args):
+        captured_args.append(args)
+        return 0
+
+    with (
+        patch("superagents_sdlc.cli._async_input", mock_input),
+        patch("superagents_sdlc.cli._run_brainstorm", fake_run_brainstorm),
+    ):
+        await _guided_new_brainstorm({"model": "m", "fast_model": None, "max_tokens": "16384"})
+
+    assert len(captured_args) == 1
+    assert captured_args[0].codebase_context is None
