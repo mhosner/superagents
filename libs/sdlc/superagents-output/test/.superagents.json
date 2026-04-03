@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "idea": "Test",
+  "state": "brainstorming",
+  "created_at": "2026-04-03T01:27:11.217607+00:00",
+  "updated_at": "2026-04-03T01:27:11.217607+00:00",
+  "model": "claude-sonnet-4-6",
+  "fast_model": null,
+  "artifacts": {
+    "brief": null,
+    "idea_memory": null,
+    "narrative": null,
+    "pipeline_dir": null
+  },
+  "pipeline": {
+    "certification": null,
+    "retry_attempted": false,
+    "pass_count": 0
+  }
+}

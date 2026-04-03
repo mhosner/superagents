@@ -484,3 +484,36 @@ async def test_auto_proceed_appends_assessment_entry():
     assert entry["event"] == "assessment"
     assert entry["confidence"] == 90
     assert entry["confidence_delta"] == 40  # 90 - 50
+
+
+async def test_confidence_assessment_includes_previous_gap_count():
+    """Interrupt payload includes previous_gap_count for drop message context."""
+    llm = StubLLMClient(responses={"Readiness ratings": _low_assessment()})
+    node = make_estimate_confidence_node(llm)
+
+    existing_gaps = [
+        {"section": "requirements", "description": "gap1"},
+        {"section": "scope_boundaries", "description": "gap2"},
+        {"section": "technical_constraints", "description": "gap3"},
+    ]
+
+    # Pass 1: cache
+    pass1 = await node(_make_state(previous_confidence=30.0))
+
+    # Simulate state where previous round had 3 gaps but cached assessment
+    # computed new gaps. Override gaps to reflect pre-assessment count.
+    pass1["gaps"] = existing_gaps
+    pass2_state = _make_state(**pass1)
+
+    # Pass 2: capture the interrupt payload
+    captured = {}
+
+    def _capture_and_return(payload):
+        captured.update(payload)
+        return "continue"
+
+    with patch(_INTERRUPT_PATH, side_effect=_capture_and_return):
+        await node(pass2_state)
+
+    assert "previous_gap_count" in captured
+    assert captured["previous_gap_count"] == 3

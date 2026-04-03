@@ -401,6 +401,8 @@ def make_generate_design_section_node(llm: LLMClient) -> Callable[..., Any]:
             "type": "design_section",
             "title": section_title,
             "content": content,
+            "section_index": idx,
+            "section_count": len(DESIGN_SECTIONS),
         })
 
         # If approved, use LLM content. Otherwise, use human's edited text.

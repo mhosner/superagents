@@ -179,6 +179,7 @@ def make_estimate_confidence_node(  # noqa: C901, PLR0915
                 "sections": section_readiness,
                 "summaries": summaries,
                 "gaps": gaps,
+                "previous_gap_count": len(state.get("gaps", [])),
                 "options": ["continue", "defer", "override"],
             })
 

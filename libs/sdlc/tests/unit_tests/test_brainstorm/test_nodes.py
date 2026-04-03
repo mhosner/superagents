@@ -310,6 +310,30 @@ async def test_generate_design_section_last_sets_synthesizing():
     assert len(result["design_sections"]) == 6
 
 
+async def test_design_section_interrupt_has_step_counter():
+    """Design section interrupt payload includes section_index and section_count."""
+    llm = StubLLMClient(responses={
+        "Problem Statement": "## Problem\nContent here",
+    })
+    node = make_generate_design_section_node(llm)
+
+    captured = {}
+
+    def _capture_and_return(payload):
+        captured.update(payload)
+        return "approve"
+
+    with patch(_INTERRUPT_PATH, side_effect=_capture_and_return):
+        await node(_make_state(
+            status="designing",
+            selected_approach="Simple",
+            current_section_idx=2,
+        ))
+
+    assert captured["section_index"] == 2
+    assert captured["section_count"] == 6
+
+
 async def test_synthesize_brief_approved():
     llm = StubLLMClient(responses={
         "Synthesize all": "# Design Brief\nFull content",
