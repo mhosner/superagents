@@ -769,3 +769,85 @@ def test_brainstorm_creates_manifest(tmp_path):
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert (tmp_path / ".superagents.json").exists()
+
+
+# -- Progress bar tests --
+
+
+def test_render_progress_bar_midpoint():
+    from superagents_sdlc.cli import _render_progress_bar
+    result = _render_progress_bar(40, 80)
+    assert "50%" in result
+    assert "█" in result
+    assert "─" in result
+    filled = result.count("█")
+    empty = result.count("─")
+    assert filled == 10
+    assert empty == 10
+
+
+def test_render_progress_bar_full():
+    from superagents_sdlc.cli import _render_progress_bar
+    result = _render_progress_bar(80, 80)
+    assert "Ready!" in result
+    assert "─" not in result
+
+
+def test_render_progress_bar_zero():
+    from superagents_sdlc.cli import _render_progress_bar
+    result = _render_progress_bar(0, 80)
+    assert "0%" in result
+    assert "█" not in result
+
+
+def test_render_progress_bar_over_threshold():
+    from superagents_sdlc.cli import _render_progress_bar
+    result = _render_progress_bar(90, 80)
+    assert "Ready!" in result
+    assert "─" not in result
+
+
+# -- Confidence drop message tests --
+
+
+def test_confidence_drop_with_more_gaps():
+    from superagents_sdlc.cli import _confidence_drop_message
+    result = _confidence_drop_message(delta=-5, current_gaps=4, previous_gaps=2)
+    assert "revealed new areas" in result.lower()
+
+
+def test_confidence_drop_same_gaps():
+    from superagents_sdlc.cli import _confidence_drop_message
+    result = _confidence_drop_message(delta=-3, current_gaps=2, previous_gaps=2)
+    assert "recalibrating" in result.lower()
+
+
+def test_confidence_drop_positive():
+    from superagents_sdlc.cli import _confidence_drop_message
+    result = _confidence_drop_message(delta=5, current_gaps=1, previous_gaps=2)
+    assert result == ""
+
+
+# -- prompt_with_help tests --
+
+
+async def test_help_stub_reprompts():
+    from unittest.mock import AsyncMock, patch
+    from superagents_sdlc.cli import _prompt_with_help
+
+    mock_input = AsyncMock(side_effect=["?", "1"])
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _prompt_with_help()
+    assert result == "1"
+    assert mock_input.call_count == 2
+
+
+async def test_help_stub_multiple_times():
+    from unittest.mock import AsyncMock, patch
+    from superagents_sdlc.cli import _prompt_with_help
+
+    mock_input = AsyncMock(side_effect=["?", "?", "hello"])
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _prompt_with_help()
+    assert result == "hello"
+    assert mock_input.call_count == 3
