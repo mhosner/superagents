@@ -749,3 +749,23 @@ async def test_auto_continue_sends_auto_continue_value(capsys):
 
     assert result == "auto_continue"
     mock_input.assert_not_called()
+
+
+def test_brainstorm_creates_manifest(tmp_path):
+    """Brainstorm run creates .superagents.json in output dir."""
+    stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "superagents_sdlc.cli",
+            "brainstorm", "Add dark mode",
+            "--output-dir", str(tmp_path),
+            "--stub", "--quiet",
+        ],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=_SDLC_DIR,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert (tmp_path / ".superagents.json").exists()

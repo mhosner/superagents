@@ -665,3 +665,22 @@ def test_handoff_d_skips_pipeline():
     for skip in ("d", "done", "x", "no", ""):
         choice = skip.strip().lower()
         assert choice not in ("p", "pipeline"), f"{skip!r} should skip pipeline"
+
+
+def test_guided_main_entry_point_exists():
+    """guided_main is importable and callable."""
+    from superagents_sdlc.cli import guided_main
+
+    assert callable(guided_main)
+
+
+def test_guided_flow_quit():
+    """Guided flow exits cleanly on 'q'."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from superagents_sdlc.cli import _guided_flow
+
+    with patch("superagents_sdlc.cli._async_input", AsyncMock(return_value="q")):
+        code = asyncio.run(_guided_flow())
+    assert code == 0

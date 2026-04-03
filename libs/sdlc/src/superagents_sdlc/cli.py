@@ -612,6 +612,15 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
             return 0
         output_dir = Path(alt.strip())
 
+    from superagents_sdlc.manifest import create_manifest, update_manifest  # noqa: PLC0415
+
+    create_manifest(
+        output_dir,
+        idea=args.idea,
+        model=args.model,
+        fast_model=getattr(args, "fast_model", None),
+    )
+
     # Build LLM client
     if args.stub:
         llm: LLMClient = StubLLMClient(responses=_brainstorm_stub_responses())
@@ -721,6 +730,12 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
     if not args.quiet:
         print(f"Narrative written to {output_dir / 'brainstorm_narrative.md'}")  # noqa: T201
 
+    update_manifest(output_dir, state="brief_ready", artifacts={
+        "brief": "design_brief.md",
+        "idea_memory": "idea_memory.md",
+        "narrative": "brainstorm_narrative.md",
+    })
+
     # Handoff prompt — skipped in quiet mode
     if args.quiet:
         return 0
@@ -751,10 +766,12 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
     if choice not in ("p", "pipeline"):
         return 0
 
+    update_manifest(output_dir, state="pipeline_running", artifacts={"pipeline_dir": "pipeline/"})
+
     # Launch pipeline subprocess
     cmd = _build_pipeline_command(args, output_dir)
     print(f"\nLaunching pipeline: {' '.join(cmd)}")  # noqa: T201
-    proc = subprocess.run(cmd)  # noqa: S603
+    proc = subprocess.run(cmd, check=False)  # noqa: S603
     print(f"\nPipeline complete (exit code {proc.returncode}). Artifacts: {output_dir}/pipeline/")  # noqa: T201
 
     # Write handoff record
@@ -1293,6 +1310,21 @@ async def _run(args: argparse.Namespace) -> int:
         pass_number = 2 if result.retry_attempted else 1
         narrative.record_final_result(result.certification, pass_number)
 
+    # Update manifest if output dir has one
+    from superagents_sdlc.manifest import update_manifest as _update_manifest  # noqa: PLC0415
+
+    pipeline_state = (
+        "pipeline_complete" if result.certification == "READY" else "pipeline_needs_work"
+    )
+    _update_manifest(
+        output_dir,
+        state=pipeline_state,
+        pipeline={
+            "certification": result.certification,
+            "retry_attempted": result.retry_attempted,
+        },
+    )
+
     # Output
     if not args.quiet:
         print(f"\nCertification: {result.certification}")  # noqa: T201
@@ -1374,6 +1406,346 @@ def main() -> None:
 
     try:
         code = asyncio.run(_run(args))
+    except (FileNotFoundError, ValueError, RuntimeError, TypeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    else:
+        sys.exit(code)
+
+
+async def _guided_flow() -> int:  # noqa: C901, PLR0912
+    """Interactive guided startup flow.
+
+    Returns:
+        Exit code (0 success, 1 error).
+    """
+    from superagents_sdlc.manifest import (  # noqa: PLC0415
+        _state_display,
+        _time_ago,
+        discover_sessions,
+    )
+
+    # Banner
+    try:
+        import importlib.metadata as _meta  # noqa: PLC0415
+
+        version = _meta.version("superagents-sdlc")
+    except Exception:  # noqa: BLE001
+        version = "dev"
+
+    print(  # noqa: T201
+        f"\n╭─────────────────────────────────────────╮\n"
+        f"│  🚀 Superagents v{version:<24s}│\n"
+        f"│  AI-powered software design assistant   │\n"
+        f"╰─────────────────────────────────────────╯"
+    )
+
+    # Settings — session-scoped defaults
+    settings: dict[str, str | None] = {
+        "model": "claude-sonnet-4-6",
+        "fast_model": None,
+        "output_root": "superagents-output",
+        "max_tokens": "16384",
+    }
+
+    while True:
+        # Discover recent sessions
+        sessions = discover_sessions(
+            Path(settings["output_root"] or "superagents-output"),
+        )
+
+        if sessions:
+            print("\nRecent sessions:")  # noqa: T201
+            for i, s in enumerate(sessions[:5], 1):
+                time_str = _time_ago(s.get("updated_at", ""))
+                state_str = _state_display(s.get("state", ""))
+                idea_short = s.get("idea", "untitled")[:40]
+                print(f"  {i}) {idea_short} ({time_str}) — {state_str}")  # noqa: T201
+            print()  # noqa: T201
+        else:
+            print("\n  Ready to design something? Let's start with your idea.\n")  # noqa: T201
+
+        print("  n) Start a new brainstorm")  # noqa: T201
+        print("  s) Settings")  # noqa: T201
+        print("  q) Quit")  # noqa: T201
+
+        try:
+            choice = (await _async_input("\n> ")).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+
+        if choice in ("q", "quit"):
+            return 0
+
+        if choice == "s":
+            await _guided_settings(settings)
+            continue
+
+        if choice == "n":
+            code = await _guided_new_brainstorm(settings)
+            if code != 0:
+                return code
+            continue
+
+        # Check if it's a session number
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(sessions):
+                code = await _guided_resume_session(sessions[idx], settings)
+                if code != 0:
+                    return code
+                continue
+
+        print("  Invalid choice. Try again.")  # noqa: T201
+
+
+async def _guided_settings(settings: dict[str, str | None]) -> None:
+    """Interactive settings sub-menu.
+
+    Args:
+        settings: Mutable settings dict to update in place.
+    """
+    while True:
+        fast_display = settings["fast_model"] or "(same as model)"
+        print("\nSettings:")  # noqa: T201
+        print(f"  Model: {settings['model']}")  # noqa: T201
+        print(f"  Fast model: {fast_display}")  # noqa: T201
+        print(f"  Output root: {settings['output_root']}")  # noqa: T201
+        print()  # noqa: T201
+        print("  1) Change model")  # noqa: T201
+        print("  2) Change fast model")  # noqa: T201
+        print("  3) Change output root")  # noqa: T201
+        print("  b) Back")  # noqa: T201
+
+        try:
+            choice = (await _async_input("\n> ")).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return
+
+        if choice in ("b", "back"):
+            return
+        if choice == "1":
+            model = (await _async_input("  Model name: ")).strip()
+            if model:
+                settings["model"] = model
+        elif choice == "2":
+            fast = (await _async_input("  Fast model name (empty for same as model): ")).strip()
+            settings["fast_model"] = fast or None
+        elif choice == "3":
+            root = (await _async_input("  Output root directory: ")).strip()
+            if root:
+                settings["output_root"] = root
+
+
+async def _guided_new_brainstorm(settings: dict[str, str | None]) -> int:
+    """Start a new brainstorm from the guided menu.
+
+    Args:
+        settings: Current session settings.
+
+    Returns:
+        Exit code.
+    """
+    print("\nWhat's your idea? Describe it in a sentence or two.")  # noqa: T201
+    print("(This will guide the brainstorm — you can refine as we go.)\n")  # noqa: T201
+
+    try:
+        idea = (await _async_input("> ")).strip()
+    except (EOFError, KeyboardInterrupt):
+        return 0
+
+    if not idea:
+        print("  No idea entered.")  # noqa: T201
+        return 0
+
+    # Construct args namespace with defaults
+    args = argparse.Namespace(
+        command="brainstorm",
+        idea=idea,
+        output_dir=None,  # _run_brainstorm will use default: superagents-output/{slug}
+        context_dir=None,
+        codebase_context=None,
+        model=settings["model"],
+        fast_model=settings["fast_model"],
+        max_tokens=int(settings["max_tokens"] or "16384"),
+        stub=False,
+        quiet=False,
+        json=False,
+        interactive=False,
+    )
+
+    return await _run_brainstorm(args)
+
+
+async def _guided_resume_session(  # noqa: C901, PLR0911, PLR0912
+    session: dict[str, object],
+    settings: dict[str, str | None],
+) -> int:
+    """Resume a previous session based on its manifest state.
+
+    Args:
+        session: Manifest dict with output_dir key.
+        settings: Current session settings.
+
+    Returns:
+        Exit code.
+    """
+    from superagents_sdlc.manifest import _state_display  # noqa: PLC0415
+
+    output_dir = Path(str(session["output_dir"]))
+    state = str(session.get("state", ""))
+    idea = str(session.get("idea", "untitled"))
+    state_str = _state_display(state)
+
+    print(f"\n  Session: {idea}")  # noqa: T201
+    print(f"  State: {state_str}")  # noqa: T201
+    print(f"  Directory: {output_dir}\n")  # noqa: T201
+
+    if state == "brainstorming":
+        print("  This brainstorm didn't finish. Start fresh with the same idea? (y/n)")  # noqa: T201
+        try:
+            choice = (await _async_input("  > ")).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+        if choice in ("y", "yes"):
+            args = argparse.Namespace(
+                command="brainstorm",
+                idea=idea,
+                output_dir=str(output_dir),
+                context_dir=None,
+                codebase_context=None,
+                model=settings["model"],
+                fast_model=settings["fast_model"],
+                max_tokens=int(settings["max_tokens"] or "16384"),
+                stub=False,
+                quiet=False,
+                json=False,
+                interactive=False,
+            )
+            return await _run_brainstorm(args)
+
+    elif state == "brief_ready":
+        print("  1) Send to pipeline")  # noqa: T201
+        print("  2) View brief")  # noqa: T201
+        print("  3) Start over")  # noqa: T201
+        try:
+            choice = (await _async_input("  > ")).strip()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+
+        if choice == "1":
+            # Build pipeline command from manifest
+            model = str(session.get("model", settings["model"]))
+            fast_model = session.get("fast_model", settings["fast_model"])
+            cmd = [
+                "uv", "run", "superagents-sdlc", "idea-to-code", idea,
+                "--brief", str(output_dir / "design_brief.md"),
+                "--output-dir", str(output_dir / "pipeline"),
+                "--interactive",
+            ]
+            if (output_dir / "idea_memory.md").exists():
+                cmd.extend(["--idea-memory", str(output_dir / "idea_memory.md")])
+            if model:
+                cmd.extend(["--model", model])
+            if fast_model:
+                cmd.extend(["--fast-model", str(fast_model)])
+            print(f"\n  Launching pipeline: {' '.join(cmd)}")  # noqa: T201
+            proc = subprocess.run(cmd, check=False)  # noqa: S603
+            print(f"\n  Pipeline complete (exit code {proc.returncode}).")  # noqa: T201
+
+        elif choice == "2":
+            brief_path = output_dir / "design_brief.md"
+            if brief_path.exists():
+                print(f"\n  Brief: {brief_path}")  # noqa: T201
+            else:
+                print("  Brief file not found.")  # noqa: T201
+
+        elif choice == "3":
+            args = argparse.Namespace(
+                command="brainstorm",
+                idea=idea,
+                output_dir=str(output_dir),
+                context_dir=None,
+                codebase_context=None,
+                model=settings["model"],
+                fast_model=settings["fast_model"],
+                max_tokens=int(settings["max_tokens"] or "16384"),
+                stub=False,
+                quiet=False,
+                json=False,
+                interactive=False,
+            )
+            return await _run_brainstorm(args)
+
+    elif state == "pipeline_complete":
+        cert = str(session.get("pipeline", {}).get("certification", "unknown"))
+        print(f"  Pipeline finished — {cert}.")  # noqa: T201
+        print("  1) View artifacts")  # noqa: T201
+        print("  2) Start a new brainstorm")  # noqa: T201
+        try:
+            choice = (await _async_input("  > ")).strip()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+
+        if choice == "1":
+            pipeline_dir = output_dir / "pipeline"
+            print(f"\n  Artifacts: {pipeline_dir}")  # noqa: T201
+        # choice == "2" falls through to return 0, which loops back to main menu
+
+    elif state == "pipeline_needs_work":
+        cert = str(session.get("pipeline", {}).get("certification", "NEEDS WORK"))
+        print(f"  Pipeline finished — {cert}.")  # noqa: T201
+        print("  1) View findings")  # noqa: T201
+        print("  2) Re-run pipeline")  # noqa: T201
+        print("  3) Start a new brainstorm")  # noqa: T201
+        try:
+            choice = (await _async_input("  > ")).strip()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+
+        if choice == "1":
+            report = output_dir / "pipeline" / "qa" / "validation_report.md"
+            print(f"\n  Findings: {report}")  # noqa: T201
+        elif choice == "2":
+            model = str(session.get("model", settings["model"]))
+            fast_model = session.get("fast_model", settings["fast_model"])
+            cmd = [
+                "uv", "run", "superagents-sdlc", "idea-to-code", idea,
+                "--brief", str(output_dir / "design_brief.md"),
+                "--output-dir", str(output_dir / "pipeline"),
+                "--interactive",
+            ]
+            if (output_dir / "idea_memory.md").exists():
+                cmd.extend(["--idea-memory", str(output_dir / "idea_memory.md")])
+            if model:
+                cmd.extend(["--model", model])
+            if fast_model:
+                cmd.extend(["--fast-model", str(fast_model)])
+            print(f"\n  Launching pipeline: {' '.join(cmd)}")  # noqa: T201
+            proc = subprocess.run(cmd, check=False)  # noqa: S603
+            print(f"\n  Pipeline complete (exit code {proc.returncode}).")  # noqa: T201
+
+    return 0
+
+
+def guided_main() -> None:
+    """Zero-config guided CLI entry point.
+
+    Presents an interactive menu for starting new brainstorms,
+    resuming previous sessions, and launching pipelines. Power-user
+    flags are available via the ``superagents-sdlc`` command instead.
+    """
+    try:
+        from dotenv import load_dotenv  # noqa: PLC0415
+
+        load_dotenv()
+    except ImportError:
+        pass
+
+    try:
+        code = asyncio.run(_guided_flow())
     except (FileNotFoundError, ValueError, RuntimeError, TypeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
         sys.exit(1)
