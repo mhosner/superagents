@@ -10,14 +10,18 @@ from pathlib import Path
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from superagents_sdlc.brainstorm.sidekick import SidekickContext
 from superagents_sdlc.cli import (
     _build_parser,
     _build_pipeline_command,
+    _build_sidekick_context,
     _extract_section_content,
     _handle_brainstorm_interrupt,
+    _prompt_with_help,
     _run_brainstorm,
     _slugify,
 )
+from superagents_sdlc.skills.llm import StubLLMClient
 
 
 # Derive cwd from test file location (portable, not hardcoded)
@@ -37,12 +41,17 @@ def test_parse_brainstorm_subcommand():
 
 def test_parse_brainstorm_with_codebase_context():
     parser = _build_parser()
-    args = parser.parse_args([
-        "brainstorm", "Add dark mode",
-        "--codebase-context", "/path/to/context.md",
-        "--output-dir", "/tmp/out",
-        "--stub",
-    ])
+    args = parser.parse_args(
+        [
+            "brainstorm",
+            "Add dark mode",
+            "--codebase-context",
+            "/path/to/context.md",
+            "--output-dir",
+            "/tmp/out",
+            "--stub",
+        ]
+    )
 
     assert args.codebase_context == "/path/to/context.md"
     assert args.output_dir == "/tmp/out"
@@ -57,9 +66,13 @@ def test_brainstorm_stub_end_to_end(tmp_path):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "brainstorm", "Add dark mode",
-            "--output-dir", str(output_dir),
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "brainstorm",
+            "Add dark mode",
+            "--output-dir",
+            str(output_dir),
             "--stub",
         ],
         input="\n".join(stdin_lines) + "\n",
@@ -79,8 +92,11 @@ def test_brainstorm_stub_quit(tmp_path):
     """User quits at first question."""
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "brainstorm", "Test",
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "brainstorm",
+            "Test",
             "--stub",
         ],
         input="q\n",
@@ -104,10 +120,15 @@ def test_brainstorm_codebase_context_file(tmp_path):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "brainstorm", "Test",
-            "--codebase-context", str(ctx_file),
-            "--output-dir", str(output_dir),
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "brainstorm",
+            "Test",
+            "--codebase-context",
+            str(ctx_file),
+            "--output-dir",
+            str(output_dir),
             "--stub",
         ],
         input="\n".join(stdin_lines) + "\n",
@@ -126,8 +147,11 @@ def test_brainstorm_no_output_dir_uses_default(tmp_path):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "brainstorm", "Test",
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "brainstorm",
+            "Test",
             "--stub",
         ],
         input="\n".join(stdin_lines) + "\n",
@@ -161,11 +185,13 @@ def test_idea_memory_written_to_disk(tmp_path):
 
 def test_extract_section_content_from_json():
     """JSON string with a ``content`` field returns only the content value."""
-    raw = json.dumps({
-        "section": "Problem Statement & Goals",
-        "status": "draft",
-        "content": "## Problem Statement\nThe app needs dark mode.",
-    })
+    raw = json.dumps(
+        {
+            "section": "Problem Statement & Goals",
+            "status": "draft",
+            "content": "## Problem Statement\nThe app needs dark mode.",
+        }
+    )
     assert _extract_section_content(raw) == "## Problem Statement\nThe app needs dark mode."
 
 
@@ -180,10 +206,16 @@ async def test_cli_returns_question_metadata_with_answer():
     payload = {
         "type": "questions",
         "questions": [
-            {"question": "How to handle cycles?",
-             "options": ["Merge into super-slice", "Emit with circular flag",
-                         "Break weakest edge", "Halt with error"],
-             "targets_section": "technical_constraints"},
+            {
+                "question": "How to handle cycles?",
+                "options": [
+                    "Merge into super-slice",
+                    "Emit with circular flag",
+                    "Break weakest edge",
+                    "Halt with error",
+                ],
+                "targets_section": "technical_constraints",
+            },
         ],
         "round": 1,
         "confidence": 40,
@@ -201,14 +233,18 @@ async def test_cli_freetext_answer_includes_metadata():
     payload = {
         "type": "questions",
         "questions": [
-            {"question": "Who are the users?",
-             "options": None,
-             "targets_section": "users_and_personas"},
+            {
+                "question": "Who are the users?",
+                "options": None,
+                "targets_section": "users_and_personas",
+            },
         ],
         "round": 1,
         "confidence": 40,
     }
-    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="DevOps engineers"):
+    with patch(
+        "superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="DevOps engineers"
+    ):
         result = await _handle_brainstorm_interrupt(payload, quiet=True)
     assert result[0]["answer"] == "DevOps engineers"
     assert result[0]["targets_section"] == "users_and_personas"
@@ -263,9 +299,7 @@ async def test_design_section_writes_to_disk_before_approval(tmp_path, capsys):
         "content": "## Problem Statement\nThe app needs dark mode.",
     }
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="approve"):
-        result = await _handle_brainstorm_interrupt(
-            payload, quiet=False, output_dir=tmp_path
-        )
+        result = await _handle_brainstorm_interrupt(payload, quiet=False, output_dir=tmp_path)
 
     expected_path = tmp_path / "sections" / "problem_statement_goals.md"
     assert expected_path.exists()
@@ -289,9 +323,7 @@ async def test_design_section_edit_writes_back(tmp_path):
         new_callable=AsyncMock,
         return_value="## Problem Statement\nEdited by user.",
     ):
-        result = await _handle_brainstorm_interrupt(
-            payload, quiet=True, output_dir=tmp_path
-        )
+        result = await _handle_brainstorm_interrupt(payload, quiet=True, output_dir=tmp_path)
 
     expected_path = tmp_path / "sections" / "problem_statement_goals.md"
     assert expected_path.read_text() == "## Problem Statement\nEdited by user."
@@ -305,9 +337,7 @@ async def test_brief_writes_to_disk_before_approval(tmp_path, capsys):
         "brief": "# Design Brief\nFull brief content here.",
     }
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="approve"):
-        result = await _handle_brainstorm_interrupt(
-            payload, quiet=False, output_dir=tmp_path
-        )
+        result = await _handle_brainstorm_interrupt(payload, quiet=False, output_dir=tmp_path)
 
     brief_path = tmp_path / "design_brief.md"
     assert brief_path.exists()
@@ -351,9 +381,7 @@ async def test_quiet_mode_still_writes_to_disk(tmp_path, capsys):
         "content": "## Problem Statement\nContent.",
     }
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="approve"):
-        await _handle_brainstorm_interrupt(
-            section_payload, quiet=True, output_dir=tmp_path
-        )
+        await _handle_brainstorm_interrupt(section_payload, quiet=True, output_dir=tmp_path)
 
     assert (tmp_path / "sections" / "problem_statement_goals.md").exists()
     captured = capsys.readouterr()
@@ -361,6 +389,7 @@ async def test_quiet_mode_still_writes_to_disk(tmp_path, capsys):
 
 
 # --- F-09: brainstorm → pipeline handoff tests ---
+
 
 def _make_args(
     idea: str = "Add dark mode",
@@ -394,12 +423,14 @@ def _make_args(
 def _make_complete_graph() -> MagicMock:
     """Return a mock graph that immediately returns a complete brainstorm state."""
     mock_graph = MagicMock()
-    mock_graph.ainvoke = AsyncMock(return_value={
-        "status": "complete",
-        "brief": "# Design Brief\nTest brief.",
-        "idea_memory": [],
-        "idea_memory_counts": {"decision": 0, "rejection": 0},
-    })
+    mock_graph.ainvoke = AsyncMock(
+        return_value={
+            "status": "complete",
+            "brief": "# Design Brief\nTest brief.",
+            "idea_memory": [],
+            "idea_memory_counts": {"decision": 0, "rejection": 0},
+        }
+    )
     return mock_graph
 
 
@@ -454,10 +485,18 @@ def test_output_dir_overwrite_prompt_no_then_alternative(tmp_path):
     alt_dir = tmp_path / "my_output"
 
     stdin_lines = [
-        "n",           # decline overwrite
+        "n",  # decline overwrite
         str(alt_dir),  # alternative path
-        "developers", "Simple", "a", "a", "a", "a", "a", "a", "a",
-        "d",           # handoff = done
+        "developers",
+        "Simple",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "d",  # handoff = done
     ]
 
     result = subprocess.run(
@@ -480,9 +519,14 @@ def test_handoff_prompt_done_exits(tmp_path):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "brainstorm", "Add dark mode", "--stub",
-            "--output-dir", str(output_dir),
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "brainstorm",
+            "Add dark mode",
+            "--stub",
+            "--output-dir",
+            str(output_dir),
         ],
         input="\n".join(stdin_lines) + "\n",
         capture_output=True,
@@ -504,11 +548,16 @@ async def test_handoff_prompt_pipeline_spawns_subprocess(tmp_path):
     args = _make_args(idea="Add dark mode", output_dir=str(output_dir), quiet=False)
     mock_proc = MagicMock(returncode=0)
 
-    with patch("superagents_sdlc.brainstorm.graph.build_brainstorm_graph", return_value=_make_complete_graph()), \
-         patch("subprocess.run", return_value=mock_proc) as mock_run, \
-         patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"), \
-         patch("superagents_sdlc.cli_spinner.print_banner"), \
-         patch("superagents_sdlc.cli_spinner.Spinner"):
+    with (
+        patch(
+            "superagents_sdlc.brainstorm.graph.build_brainstorm_graph",
+            return_value=_make_complete_graph(),
+        ),
+        patch("subprocess.run", return_value=mock_proc) as mock_run,
+        patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"),
+        patch("superagents_sdlc.cli_spinner.print_banner"),
+        patch("superagents_sdlc.cli_spinner.Spinner"),
+    ):
         exit_code = await _run_brainstorm(args)
 
     assert exit_code == 0
@@ -531,11 +580,16 @@ async def test_handoff_writes_handoff_md(tmp_path):
     args = _make_args(idea="Add dark mode", output_dir=str(output_dir), quiet=False)
     mock_proc = MagicMock(returncode=0)
 
-    with patch("superagents_sdlc.brainstorm.graph.build_brainstorm_graph", return_value=_make_complete_graph()), \
-         patch("subprocess.run", return_value=mock_proc), \
-         patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"), \
-         patch("superagents_sdlc.cli_spinner.print_banner"), \
-         patch("superagents_sdlc.cli_spinner.Spinner"):
+    with (
+        patch(
+            "superagents_sdlc.brainstorm.graph.build_brainstorm_graph",
+            return_value=_make_complete_graph(),
+        ),
+        patch("subprocess.run", return_value=mock_proc),
+        patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"),
+        patch("superagents_sdlc.cli_spinner.print_banner"),
+        patch("superagents_sdlc.cli_spinner.Spinner"),
+    ):
         await _run_brainstorm(args)
 
     handoff_path = output_dir / "handoff.md"
@@ -555,9 +609,15 @@ def test_quiet_mode_skips_handoff_prompt(tmp_path):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "brainstorm", "Add dark mode", "--stub", "--quiet",
-            "--output-dir", str(output_dir),
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "brainstorm",
+            "Add dark mode",
+            "--stub",
+            "--quiet",
+            "--output-dir",
+            str(output_dir),
         ],
         input="\n".join(stdin_lines) + "\n",
         capture_output=True,
@@ -585,11 +645,16 @@ async def test_codebase_context_forwarded(tmp_path):
     )
     mock_proc = MagicMock(returncode=0)
 
-    with patch("superagents_sdlc.brainstorm.graph.build_brainstorm_graph", return_value=_make_complete_graph()), \
-         patch("subprocess.run", return_value=mock_proc) as mock_run, \
-         patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"), \
-         patch("superagents_sdlc.cli_spinner.print_banner"), \
-         patch("superagents_sdlc.cli_spinner.Spinner"):
+    with (
+        patch(
+            "superagents_sdlc.brainstorm.graph.build_brainstorm_graph",
+            return_value=_make_complete_graph(),
+        ),
+        patch("subprocess.run", return_value=mock_proc) as mock_run,
+        patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"),
+        patch("superagents_sdlc.cli_spinner.print_banner"),
+        patch("superagents_sdlc.cli_spinner.Spinner"),
+    ):
         await _run_brainstorm(args)
 
     cmd = mock_run.call_args[0][0]
@@ -758,10 +823,15 @@ def test_brainstorm_creates_manifest(tmp_path):
     stdin_lines = ["developers", "Simple", "a", "a", "a", "a", "a", "a", "a"]
     result = subprocess.run(
         [
-            sys.executable, "-m", "superagents_sdlc.cli",
-            "brainstorm", "Add dark mode",
-            "--output-dir", str(tmp_path),
-            "--stub", "--quiet",
+            sys.executable,
+            "-m",
+            "superagents_sdlc.cli",
+            "brainstorm",
+            "Add dark mode",
+            "--output-dir",
+            str(tmp_path),
+            "--stub",
+            "--quiet",
         ],
         input="\n".join(stdin_lines) + "\n",
         capture_output=True,
@@ -778,6 +848,7 @@ def test_brainstorm_creates_manifest(tmp_path):
 
 def test_render_progress_bar_midpoint():
     from superagents_sdlc.cli import _render_progress_bar
+
     result = _render_progress_bar(40, 80)
     assert "50%" in result
     assert "█" in result
@@ -790,6 +861,7 @@ def test_render_progress_bar_midpoint():
 
 def test_render_progress_bar_full():
     from superagents_sdlc.cli import _render_progress_bar
+
     result = _render_progress_bar(80, 80)
     assert "Ready!" in result
     assert "─" not in result
@@ -797,6 +869,7 @@ def test_render_progress_bar_full():
 
 def test_render_progress_bar_zero():
     from superagents_sdlc.cli import _render_progress_bar
+
     result = _render_progress_bar(0, 80)
     assert "0%" in result
     assert "█" not in result
@@ -804,6 +877,7 @@ def test_render_progress_bar_zero():
 
 def test_render_progress_bar_over_threshold():
     from superagents_sdlc.cli import _render_progress_bar
+
     result = _render_progress_bar(90, 80)
     assert "Ready!" in result
     assert "─" not in result
@@ -814,18 +888,21 @@ def test_render_progress_bar_over_threshold():
 
 def test_confidence_drop_with_more_gaps():
     from superagents_sdlc.cli import _confidence_drop_message
+
     result = _confidence_drop_message(delta=-5, current_gaps=4, previous_gaps=2)
     assert "revealed new areas" in result.lower()
 
 
 def test_confidence_drop_same_gaps():
     from superagents_sdlc.cli import _confidence_drop_message
+
     result = _confidence_drop_message(delta=-3, current_gaps=2, previous_gaps=2)
     assert "recalibrating" in result.lower()
 
 
 def test_confidence_drop_positive():
     from superagents_sdlc.cli import _confidence_drop_message
+
     result = _confidence_drop_message(delta=5, current_gaps=1, previous_gaps=2)
     assert result == ""
 
@@ -863,9 +940,11 @@ async def test_question_shows_progress_bar(capsys):
     payload = {
         "type": "questions",
         "questions": [
-            {"question": "Who are the users?",
-             "options": ["developers", "PMs"],
-             "targets_section": "users_and_personas"},
+            {
+                "question": "Who are the users?",
+                "options": ["developers", "PMs"],
+                "targets_section": "users_and_personas",
+            },
         ],
         "round": 1,
         "confidence": 40,
@@ -884,9 +963,11 @@ async def test_question_hides_target_section_by_default(capsys):
     payload = {
         "type": "questions",
         "questions": [
-            {"question": "Who are the users?",
-             "options": None,
-             "targets_section": "users_and_personas"},
+            {
+                "question": "Who are the users?",
+                "options": None,
+                "targets_section": "users_and_personas",
+            },
         ],
         "round": 1,
         "confidence": 40,
@@ -903,9 +984,11 @@ async def test_question_shows_target_section_verbose(capsys):
     payload = {
         "type": "questions",
         "questions": [
-            {"question": "Who are the users?",
-             "options": None,
-             "targets_section": "users_and_personas"},
+            {
+                "question": "Who are the users?",
+                "options": None,
+                "targets_section": "users_and_personas",
+            },
         ],
         "round": 1,
         "confidence": 40,
@@ -996,7 +1079,9 @@ async def test_design_section_step_counter(capsys, tmp_path):
     }
     with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="a"):
         result = await _handle_brainstorm_interrupt(
-            payload, quiet=False, output_dir=tmp_path,
+            payload,
+            quiet=False,
+            output_dir=tmp_path,
         )
     assert result == "approve"
     captured = capsys.readouterr()
@@ -1074,3 +1159,103 @@ def test_verbose_flag_parsed():
 
     args_default = parser.parse_args(["brainstorm", "Test idea", "--stub"])
     assert args_default.verbose is False
+
+
+# --- Sidekick callout skill tests ---
+
+
+async def test_help_menu_shown_on_question_mark():
+    """? at a question prompt shows the sidekick sub-menu."""
+    ctx = SidekickContext(
+        idea="App",
+        question_text="Q?",
+        options=["A", "B"],
+        targets_section="",
+        decisions_so_far="",
+        selected_approach="",
+        product_context="",
+    )
+    llm = StubLLMClient(responses={})
+    mock_input = AsyncMock(side_effect=["?", "b", "A"])
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _prompt_with_help("> ", sidekick_context=ctx, llm=llm)
+    assert result == "A"
+
+
+async def test_help_runs_skill_and_reprompts():
+    """Selecting a skill runs it and then re-prompts for the real answer."""
+    ctx = SidekickContext(
+        idea="App",
+        question_text="Storage?",
+        options=["PostgreSQL", "SQLite"],
+        targets_section="",
+        decisions_so_far="",
+        selected_approach="",
+        product_context="",
+    )
+    llm = StubLLMClient(responses={"Analyze the pros and cons": "### PostgreSQL\n**Pros:** Great"})
+    mock_input = AsyncMock(side_effect=["?", "1", "PostgreSQL"])
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _prompt_with_help("> ", sidekick_context=ctx, llm=llm)
+    assert result == "PostgreSQL"
+    assert len(llm.calls) == 1
+
+
+async def test_help_without_context_shows_fallback():
+    """? without sidekick context shows fallback message."""
+    mock_input = AsyncMock(side_effect=["?", "answer"])
+    with patch("superagents_sdlc.cli._async_input", mock_input):
+        result = await _prompt_with_help("> ")
+    assert result == "answer"
+
+
+async def test_build_sidekick_context_questions():
+    """_build_sidekick_context extracts question data from payload."""
+    payload = {
+        "type": "questions",
+        "questions": [
+            {
+                "question": "Who are the users?",
+                "options": ["devs", "PMs"],
+                "targets_section": "users_and_personas",
+            },
+        ],
+    }
+    ctx = _build_sidekick_context(payload, idea="Dark mode")
+    assert ctx.idea == "Dark mode"
+    assert ctx.question_text == "Who are the users?"
+    assert ctx.options == ["devs", "PMs"]
+    assert ctx.targets_section == "users_and_personas"
+
+
+async def test_build_sidekick_context_approaches():
+    """_build_sidekick_context extracts approach names as options."""
+    payload = {
+        "type": "approaches",
+        "approaches": [
+            {"name": "Simple", "description": "desc", "tradeoffs": "t"},
+            {"name": "Complex", "description": "desc", "tradeoffs": "t"},
+        ],
+    }
+    ctx = _build_sidekick_context(payload, idea="Feature")
+    assert ctx.options == ["Simple", "Complex"]
+
+
+async def test_build_sidekick_context_with_state():
+    """_build_sidekick_context uses brainstorm_state for approach and context."""
+    payload = {
+        "type": "questions",
+        "questions": [
+            {"question": "Q?", "options": ["A"], "targets_section": ""},
+        ],
+    }
+    ctx = _build_sidekick_context(
+        payload,
+        idea="Feature",
+        brainstorm_state={
+            "selected_approach": "Microservices",
+            "product_context": "SaaS platform",
+        },
+    )
+    assert ctx.selected_approach == "Microservices"
+    assert ctx.product_context == "SaaS platform"

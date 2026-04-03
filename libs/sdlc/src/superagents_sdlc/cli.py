@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from superagents_sdlc.skills.llm import LLMClient, StubLLMClient
 
 if TYPE_CHECKING:
+    from superagents_sdlc.brainstorm.sidekick import SidekickContext
     from superagents_sdlc.skills.base import Artifact
     from superagents_sdlc.workflows.narrative import NarrativeWriter
     from superagents_sdlc.workflows.orchestrator import PipelineOrchestrator
@@ -49,7 +50,9 @@ def _render_progress_bar(confidence: int, threshold: int, width: int = 20) -> st
 
 
 def _confidence_drop_message(
-    delta: int, current_gaps: int, previous_gaps: int,
+    delta: int,
+    current_gaps: int,
+    previous_gaps: int,
 ) -> str:
     """Generate a contextual message when confidence drops.
 
@@ -68,25 +71,64 @@ def _confidence_drop_message(
     return "↓ Recalibrating based on your input"
 
 
-async def _prompt_with_help(prompt: str = "> ") -> str:
-    """Prompt for input, handling ``?`` help requests.
+async def _prompt_with_help(
+    prompt: str = "> ",
+    *,
+    sidekick_context: SidekickContext | None = None,
+    llm: LLMClient | None = None,
+) -> str:
+    """Prompt for input, handling ``?`` help requests with sidekick skills.
 
-    Intercepts ``?`` and prints a placeholder help message, then
-    re-prompts. Phase 3 will wire this up to real callout skills.
-    The ``?`` input is never returned to the caller.
+    When the user types ``?``, shows a sub-menu of thinking tools. If
+    sidekick context and LLM are available, runs the selected skill and
+    displays the result. Otherwise shows a fallback message.
 
     Args:
         prompt: Prompt string to display.
+        sidekick_context: Context for sidekick skills.
+        llm: LLM client for sidekick skill calls.
 
     Returns:
         The user's non-help input.
     """
     while True:
         response = await _async_input(prompt)
-        if response.strip() == "?":
-            print("  Help options coming soon! For now, pick an answer or type your own.")  # noqa: T201
+        if response.strip() != "?":
+            return response
+
+        # Handle ? input
+        if sidekick_context is None or llm is None:
+            print("  Help options aren't available for this prompt.")  # noqa: T201
             continue
-        return response
+
+        from superagents_sdlc.brainstorm.sidekick import SKILLS, run_sidekick_skill  # noqa: PLC0415
+
+        print("\n  How can I help?\n")  # noqa: T201
+        for skill in SKILLS:
+            print(f"  {skill.key}) {skill.name} — {skill.description}")  # noqa: T201
+        print("  b) Back\n")  # noqa: T201
+
+        choice = await _async_input("  > ")
+        if choice.strip().lower() in ("b", "back"):
+            continue
+
+        # Find matching skill
+        selected = None
+        for skill in SKILLS:
+            if choice.strip() == skill.key:
+                selected = skill
+                break
+
+        if selected is None:
+            print("  Invalid choice.")  # noqa: T201
+            continue
+
+        # Run the skill
+        print(f"\n  ─── {selected.name} {'─' * (37 - len(selected.name))}\n")  # noqa: T201
+        result = await run_sidekick_skill(selected, sidekick_context, llm)
+        print(f"  {result}\n")  # noqa: T201
+        print(f"  {'─' * 42}\n")  # noqa: T201
+        print("  Now, what's your answer?")  # noqa: T201
 
 
 class _SpinnerLLMClient:
@@ -128,7 +170,9 @@ class _SpinnerLLMClient:
         self._spinner.start(random.choice(PHRASES))  # noqa: S311
         try:
             return await self._inner.generate(
-                prompt, system=system, cached_prefix=cached_prefix,
+                prompt,
+                system=system,
+                cached_prefix=cached_prefix,
             )
         finally:
             self._spinner.stop()
@@ -221,8 +265,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--fast-model",
         default=None,
         help=(
-            "Cheaper model for Architect/Developer/FindingsRouter "
-            "(default: uses --model for all)."
+            "Cheaper model for Architect/Developer/FindingsRouter (default: uses --model for all)."
         ),
     )
     shared.add_argument(
@@ -312,7 +355,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory to write the design brief (optional).",
     )
     brainstorm_parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         default=False,
         help="Show detailed section readiness and gap information.",
@@ -339,18 +383,20 @@ def _brainstorm_stub_responses() -> dict[str, str]:
         # in synthesize prompt.
         "Synthesize all": "# Design Brief\nStub design brief for testing.",
         # Confidence assessment — must come before question prompt keys
-        "Readiness ratings": json.dumps({
-            "sections": {
-                "problem_statement": {"readiness": "high", "evidence": "clear"},
-                "users_and_personas": {"readiness": "high", "evidence": "clear"},
-                "requirements": {"readiness": "high", "evidence": "clear"},
-                "acceptance_criteria": {"readiness": "high", "evidence": "clear"},
-                "scope_boundaries": {"readiness": "high", "evidence": "clear"},
-                "technical_constraints": {"readiness": "high", "evidence": "clear"},
-            },
-            "gaps": [],
-            "recommendation": "ready",
-        }),
+        "Readiness ratings": json.dumps(
+            {
+                "sections": {
+                    "problem_statement": {"readiness": "high", "evidence": "clear"},
+                    "users_and_personas": {"readiness": "high", "evidence": "clear"},
+                    "requirements": {"readiness": "high", "evidence": "clear"},
+                    "acceptance_criteria": {"readiness": "high", "evidence": "clear"},
+                    "scope_boundaries": {"readiness": "high", "evidence": "clear"},
+                    "technical_constraints": {"readiness": "high", "evidence": "clear"},
+                },
+                "gaps": [],
+                "recommendation": "ready",
+            }
+        ),
         "## Gaps to address": (
             '{"questions": [{"question": "Who are the target users?",'
             ' "options": ["developers", "PMs", "both"],'
@@ -419,10 +465,17 @@ def _build_pipeline_command(args: argparse.Namespace, output_dir: Path) -> list[
         Command list suitable for ``subprocess.run``.
     """
     cmd = [
-        "uv", "run", "superagents-sdlc", "idea-to-code", args.idea,
-        "--brief", str(output_dir / "design_brief.md"),
-        "--idea-memory", str(output_dir / "idea_memory.md"),
-        "--output-dir", str(output_dir / "pipeline"),
+        "uv",
+        "run",
+        "superagents-sdlc",
+        "idea-to-code",
+        args.idea,
+        "--brief",
+        str(output_dir / "design_brief.md"),
+        "--idea-memory",
+        str(output_dir / "idea_memory.md"),
+        "--output-dir",
+        str(output_dir / "pipeline"),
     ]
     if args.codebase_context:
         cmd.extend(["--codebase-context", args.codebase_context])
@@ -437,12 +490,93 @@ def _build_pipeline_command(args: argparse.Namespace, output_dir: Path) -> list[
     return cmd
 
 
+def _build_sidekick_context(
+    payload: dict,
+    *,
+    idea: str,
+    brainstorm_state: dict | None = None,
+) -> SidekickContext:
+    """Build sidekick context from an interrupt payload.
+
+    Args:
+        payload: Interrupt payload dict.
+        idea: The brainstorm idea string.
+        brainstorm_state: Current graph state snapshot.
+
+    Returns:
+        SidekickContext for sidekick skill execution.
+    """
+    from superagents_sdlc.brainstorm.sidekick import SidekickContext  # noqa: PLC0415
+
+    state = brainstorm_state or {}
+    interrupt_type = payload.get("type", "")
+
+    # Extract question and options based on interrupt type
+    if interrupt_type == "questions":
+        questions = payload.get("questions", [])
+        if questions:
+            q = questions[0]  # Use first question for context
+            question_text = q.get("question", "")
+            options = q.get("options")
+            targets_section = q.get("targets_section", "")
+        else:
+            question_text = ""
+            options = None
+            targets_section = ""
+    elif interrupt_type == "approaches":
+        question_text = "Which implementation approach should we use?"
+        approaches = payload.get("approaches", [])
+        options = [a.get("name", "") for a in approaches]
+        targets_section = ""
+    elif interrupt_type == "confidence_assessment":
+        question_text = "Should we continue exploring or move on?"
+        options = ["Continue exploring", "Override and proceed", "Defer some sections"]
+        targets_section = ""
+    elif interrupt_type in ("design_section", "brief"):
+        question_text = f"Review: {payload.get('title', 'section')}"
+        options = ["Approve", "Edit"]
+        targets_section = ""
+    elif interrupt_type == "stall_exit":
+        question_text = "Progress has stalled. Should we move on to design or keep exploring?"
+        options = ["Move on to design", "Keep exploring"]
+        targets_section = ""
+    else:
+        question_text = ""
+        options = None
+        targets_section = ""
+
+    # Extract decisions from IdeaMemory if available
+    decisions_so_far = ""
+    if state.get("idea_memory"):
+        from superagents_sdlc.brainstorm.idea_memory import IdeaMemory  # noqa: PLC0415
+
+        memory = IdeaMemory.from_state(
+            idea,
+            state.get("idea_memory", []),
+            state.get("idea_memory_counts", {"decision": 0, "rejection": 0}),
+        )
+        decisions_so_far = memory.format_for_prompt()
+
+    return SidekickContext(
+        idea=idea,
+        question_text=question_text,
+        options=options,
+        targets_section=targets_section,
+        decisions_so_far=decisions_so_far,
+        selected_approach=state.get("selected_approach", ""),
+        product_context=state.get("product_context", ""),
+    )
+
+
 async def _handle_brainstorm_interrupt(
     payload: dict,
     *,
     quiet: bool = False,
     verbose: bool = False,
     output_dir: Path | None = None,
+    llm: LLMClient | None = None,
+    idea: str = "",
+    brainstorm_state: dict | None = None,
 ) -> str:
     """Handle a brainstorm interrupt by prompting the user.
 
@@ -453,6 +587,10 @@ async def _handle_brainstorm_interrupt(
         output_dir: Directory to write artifacts to disk before approval.
             When provided, design sections and briefs are written to disk
             and only the file path is shown (not the full content).
+        llm: LLM client for sidekick skill calls. Passed through to
+            ``_prompt_with_help`` so the ``?`` menu can run skills.
+        idea: The brainstorm idea string, used to build sidekick context.
+        brainstorm_state: Current graph state snapshot for sidekick context.
 
     Returns:
         User's response string.
@@ -462,6 +600,17 @@ async def _handle_brainstorm_interrupt(
     """
     interrupt_type = payload["type"]
 
+    # Build sidekick context for ? menu (skip in quiet mode)
+    sidekick_ctx = (
+        _build_sidekick_context(
+            payload,
+            idea=idea,
+            brainstorm_state=brainstorm_state,
+        )
+        if not quiet
+        else None
+    )
+
     if interrupt_type == "questions":
         questions = payload.get("questions", [])
         if not quiet:
@@ -470,6 +619,16 @@ async def _handle_brainstorm_interrupt(
             print(f"\n{_render_progress_bar(confidence, threshold)}")  # noqa: T201
         answers = []
         for i, q in enumerate(questions, 1):
+            # Build per-question sidekick context
+            q_ctx = (
+                _build_sidekick_context(
+                    {"type": "questions", "questions": [q]},
+                    idea=idea,
+                    brainstorm_state=brainstorm_state,
+                )
+                if not quiet
+                else None
+            )
             if not quiet:
                 target = q.get("targets_section", "")
                 if verbose and target:
@@ -490,7 +649,7 @@ async def _handle_brainstorm_interrupt(
                     )
                 else:
                     print("  Type your answer   ?) Help   q) Quit")  # noqa: T201
-            response = await _prompt_with_help()
+            response = await _prompt_with_help("> ", sidekick_context=q_ctx, llm=llm)
             if response.strip().lower() in ("q", "quit"):
                 raise _BrainstormQuit
             # Return resolved answer + question metadata from the
@@ -504,11 +663,13 @@ async def _handle_brainstorm_interrupt(
 
                 cleaned = [_clean_option(o) for o in raw_opts]
                 response = _resolve_answer(response, cleaned)
-            answers.append({
-                "answer": response,
-                "targets_section": q.get("targets_section", ""),
-                "question_text": q.get("question", ""),
-            })
+            answers.append(
+                {
+                    "answer": response,
+                    "targets_section": q.get("targets_section", ""),
+                    "question_text": q.get("question", ""),
+                }
+            )
         return answers
 
     # Legacy single-question format
@@ -521,7 +682,7 @@ async def _handle_brainstorm_interrupt(
                 for i, opt in enumerate(payload["options"], 1):
                     print(f"  {i}) {_clean_option(opt)}")  # noqa: T201
             print("  Type your answer   ?) Help   q) Quit")  # noqa: T201
-        response = await _prompt_with_help()
+        response = await _prompt_with_help("> ", sidekick_context=sidekick_ctx, llm=llm)
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         return response
@@ -541,8 +702,7 @@ async def _handle_brainstorm_interrupt(
                 count = len(gaps)
                 label = "area" if count == 1 else "areas"
                 print(  # noqa: T201
-                    f"\n  {bar}"
-                    f" — auto-continuing ({count} {label} remaining)"
+                    f"\n  {bar} — auto-continuing ({count} {label} remaining)"
                 )
             return "auto_continue"
 
@@ -550,10 +710,13 @@ async def _handle_brainstorm_interrupt(
             print(f"\n{_render_progress_bar(confidence, threshold)}")  # noqa: T201
             delta = payload.get("confidence_delta", 0)
             previous_gaps = payload.get(
-                "previous_gap_count", len(gaps),
+                "previous_gap_count",
+                len(gaps),
             )
             drop_msg = _confidence_drop_message(
-                delta, len(gaps), previous_gaps,
+                delta,
+                len(gaps),
+                previous_gaps,
             )
             if drop_msg:
                 print(f"{drop_msg}")  # noqa: T201
@@ -573,8 +736,7 @@ async def _handle_brainstorm_interrupt(
                         marker = markers.get(readiness, "?")
                         summary = summaries.get(section, "")
                         print(  # noqa: T201
-                            f"    {marker} {section}:"
-                            f" {readiness.upper()} — {summary}"
+                            f"    {marker} {section}: {readiness.upper()} — {summary}"
                         )
                 if gaps:
                     print("\n  Gaps:")  # noqa: T201
@@ -585,12 +747,11 @@ async def _handle_brainstorm_interrupt(
 
             if verbose:
                 print(  # noqa: T201
-                    "\n  c) Continue   d) Defer sections"
-                    "   o) Override   q) Quit   ?) Help"
+                    "\n  c) Continue   d) Defer sections   o) Override   q) Quit   ?) Help"
                 )
             else:
                 print("\n  c) Continue   q) Quit   ?) Help")  # noqa: T201
-        response = await _prompt_with_help()
+        response = await _prompt_with_help("> ", sidekick_context=sidekick_ctx, llm=llm)
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         choice = response.strip().lower()
@@ -601,7 +762,7 @@ async def _handle_brainstorm_interrupt(
         if choice.startswith("d"):
             if not quiet:
                 print("Defer which sections? (comma-separated):")  # noqa: T201
-            sections_input = await _prompt_with_help()
+            sections_input = await _prompt_with_help("> ", sidekick_context=sidekick_ctx, llm=llm)
             if sections_input.strip().lower() in ("q", "quit"):
                 raise _BrainstormQuit
             return f"defer {sections_input.strip()}"
@@ -612,14 +773,13 @@ async def _handle_brainstorm_interrupt(
             print("\n  Choosing an approach\n")  # noqa: T201
             for i, approach in enumerate(payload["approaches"], 1):
                 print(  # noqa: T201
-                    f"  {i}) {approach['name']}"
-                    f" — {approach['description']}"
+                    f"  {i}) {approach['name']} — {approach['description']}"
                 )
                 print(  # noqa: T201
                     f"     Tradeoffs: {approach['tradeoffs']}"
                 )
             print("\n  Pick a number   ?) Help   q) Quit")  # noqa: T201
-        response = await _prompt_with_help()
+        response = await _prompt_with_help("> ", sidekick_context=sidekick_ctx, llm=llm)
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         return response
@@ -652,7 +812,7 @@ async def _handle_brainstorm_interrupt(
             print(  # noqa: T201
                 "\n  a) Approve   e) Edit   ?) Help   q) Quit"
             )
-        response = await _prompt_with_help()
+        response = await _prompt_with_help("> ", sidekick_context=sidekick_ctx, llm=llm)
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         if response.strip().lower() in ("a", "approve"):
@@ -679,7 +839,7 @@ async def _handle_brainstorm_interrupt(
             print(  # noqa: T201
                 "\n  a) Approve   e) Edit   ?) Help   q) Quit"
             )
-        response = await _prompt_with_help()
+        response = await _prompt_with_help("> ", sidekick_context=sidekick_ctx, llm=llm)
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         return "approve" if response.strip().lower() in ("a", "approve") else response
@@ -691,8 +851,7 @@ async def _handle_brainstorm_interrupt(
             gaps = payload.get("gaps", [])
             print(f"\n{_render_progress_bar(confidence, threshold)}")  # noqa: T201
             print(  # noqa: T201
-                "  Progress has stalled"
-                " — confidence hasn't changed in recent rounds"
+                "  Progress has stalled — confidence hasn't changed in recent rounds"
             )
             count = len(gaps)
             verb = "needs" if count == 1 else "need"
@@ -705,10 +864,9 @@ async def _handle_brainstorm_interrupt(
                         f"    - {g['section']}: {g['description']}"
                     )
             print(  # noqa: T201
-                "\n  p) Move on to design   c) Keep exploring"
-                "   ?) Help   q) Quit"
+                "\n  p) Move on to design   c) Keep exploring   ?) Help   q) Quit"
             )
-        response = await _prompt_with_help()
+        response = await _prompt_with_help("> ", sidekick_context=sidekick_ctx, llm=llm)
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         choice = response.strip().lower()
@@ -717,7 +875,7 @@ async def _handle_brainstorm_interrupt(
         return "continue"
 
     # Unknown interrupt type — generic prompt
-    response = await _prompt_with_help()
+    response = await _prompt_with_help("> ", sidekick_context=sidekick_ctx, llm=llm)
     if response.strip().lower() in ("q", "quit"):
         raise _BrainstormQuit
     return response
@@ -775,6 +933,8 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
         from superagents_sdlc.skills.llm import AnthropicLLMClient  # noqa: PLC0415
 
         llm = AnthropicLLMClient(model=args.model, max_tokens=args.max_tokens)
+
+    raw_llm = llm  # Preserve unwrapped LLM for sidekick calls
 
     # Banner and spinner
     if not args.quiet:
@@ -843,6 +1003,9 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
                 quiet=args.quiet,
                 verbose=getattr(args, "verbose", False),
                 output_dir=output_dir,
+                llm=raw_llm,
+                idea=args.idea,
+                brainstorm_state=dict(result) if isinstance(result, dict) else None,
             )
             result = await graph.ainvoke(Command(resume=response), config)
     except _BrainstormQuit:
@@ -878,11 +1041,15 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
     if not args.quiet:
         print(f"Narrative written to {output_dir / 'brainstorm_narrative.md'}")  # noqa: T201
 
-    update_manifest(output_dir, state="brief_ready", artifacts={
-        "brief": "design_brief.md",
-        "idea_memory": "idea_memory.md",
-        "narrative": "brainstorm_narrative.md",
-    })
+    update_manifest(
+        output_dir,
+        state="brief_ready",
+        artifacts={
+            "brief": "design_brief.md",
+            "idea_memory": "idea_memory.md",
+            "narrative": "brainstorm_narrative.md",
+        },
+    )
 
     # Handoff prompt — skipped in quiet mode
     if args.quiet:
@@ -963,29 +1130,32 @@ def _stub_responses() -> dict[str, str]:
         ),
         # QA skills — must come before Architect/Developer keys
         "## Compliance report\n": (
-            "# Validation Report\n## Executive Summary\nDone.\n"
-            "## Certification\nNEEDS WORK"
+            "# Validation Report\n## Executive Summary\nDone.\n## Certification\nNEEDS WORK"
         ),
         "## Plan structure analysis\n": (
             "## Compliance Check\n| Feature | PASS |\n"
             "## Summary\nTotal: 1 | Pass: 1\nOverall: NEEDS WORK"
         ),
         # FindingsRouter — must come before other keys containing "## Validation report"
-        "## Validation report\n": json.dumps({
-            "certification": "NEEDS WORK",
-            "total_findings": 1,
-            "routing": {
-                "product_manager": [],
-                "architect": [{
-                    "id": "RF-1",
-                    "summary": "Minor spec gap",
-                    "detail": "Detail text",
-                    "affected_artifact": "tech_spec",
-                    "related_requirements": [{"id": "AC-1", "text": "Criterion"}],
-                }],
-                "developer": [],
-            },
-        }),
+        "## Validation report\n": json.dumps(
+            {
+                "certification": "NEEDS WORK",
+                "total_findings": 1,
+                "routing": {
+                    "product_manager": [],
+                    "architect": [
+                        {
+                            "id": "RF-1",
+                            "summary": "Minor spec gap",
+                            "detail": "Detail text",
+                            "affected_artifact": "tech_spec",
+                            "related_requirements": [{"id": "AC-1", "text": "Criterion"}],
+                        }
+                    ],
+                    "developer": [],
+                },
+            }
+        ),
         # Architect skills
         "## PRD\n": "# Tech Spec\n## Architecture\nSimple",
         "## Technical specification\n": "## Tasks\n1. Build it",
@@ -1007,6 +1177,7 @@ def _serialize_result(result: PipelineResult) -> str:
     Returns:
         JSON string with indentation.
     """
+
     def _dump_artifacts(artifacts: list[Artifact]) -> list[dict[str, object]]:
         return [a.model_dump() for a in artifacts]
 
@@ -1039,6 +1210,7 @@ def _make_phase_callback(
     Returns:
         Callback function for on_phase_complete.
     """
+
     def on_phase(name: str, artifacts: list[Artifact]) -> None:
         # Detect automated retry: a repeated phase name means retry started
         if name in seen_phases and not retry_state["started"]:
@@ -1079,6 +1251,7 @@ def _make_skill_callback(
     Returns:
         Callback function for on_skill_complete.
     """
+
     def on_skill(persona_name: str, skill_name: str, summary: str) -> None:
         narrative.record_skill_execution(persona_name, skill_name, summary)
         if not quiet:
@@ -1113,6 +1286,7 @@ def _make_qa_callback(
     Returns:
         Callback function for on_qa_complete.
     """
+
     def on_qa(certification: str, artifacts: list[Artifact]) -> None:
         # Extract compliance counts from compliance_report metadata
         total_checks = 0
@@ -1135,11 +1309,13 @@ def _make_qa_callback(
                     manifest = json.loads(Path(a.path).read_text())
                     for items in manifest.get("routing", {}).values():
                         for item in items:
-                            findings.append({
-                                "id": item.get("id", "?"),
-                                "summary": item.get("summary", ""),
-                                "severity": "HIGH",
-                            })
+                            findings.append(
+                                {
+                                    "id": item.get("id", "?"),
+                                    "summary": item.get("summary", ""),
+                                    "severity": "HIGH",
+                                }
+                            )
                 except (json.JSONDecodeError, KeyError):
                     pass
         narrative.record_qa_findings(
@@ -1182,6 +1358,7 @@ def _make_routing_callback(
     Returns:
         Callback function for on_findings_routed.
     """
+
     def on_routed(routing: dict, cascade: list[str]) -> None:
         narrative.record_findings_routing(routing, cascade)
         if not quiet:
@@ -1216,11 +1393,10 @@ def _make_retry_callback(
     Returns:
         Callback function for on_retry_start.
     """
+
     def on_retry(pre_certification: str, routing: dict) -> None:
         total = sum(len(items) for items in routing.values())
-        breakdown = {
-            persona: len(items) for persona, items in routing.items()
-        }
+        breakdown = {persona: len(items) for persona, items in routing.items()}
         narrative.record_retry_start(
             pre_retry_certification=pre_certification,
             finding_count=total,
@@ -1378,7 +1554,8 @@ async def _run(args: argparse.Namespace) -> int:
         llm = AnthropicLLMClient(model=args.model, max_tokens=args.max_tokens)
         if args.fast_model:
             fast_llm = AnthropicLLMClient(
-                model=args.fast_model, max_tokens=args.max_tokens,
+                model=args.fast_model,
+                max_tokens=args.max_tokens,
             )
 
     # Build policy engine
@@ -1390,7 +1567,10 @@ async def _run(args: argparse.Namespace) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     orchestrator = PipelineOrchestrator(
-        llm=llm, fast_llm=fast_llm, policy_engine=engine, context=context,
+        llm=llm,
+        fast_llm=fast_llm,
+        policy_engine=engine,
+        context=context,
     )
 
     # Banner and spinner
@@ -1409,17 +1589,17 @@ async def _run(args: argparse.Namespace) -> int:
         spinner = None
 
     # Set up narrative writer
-    narrative = NarrativeWriter(
-        output_dir, f'{args.command} "{getattr(args, "idea", "pipeline")}"'
-    )
+    narrative = NarrativeWriter(output_dir, f'{args.command} "{getattr(args, "idea", "pipeline")}"')
     narrative.start_pass(1, "Initial Run")
 
     # Build callbacks
     seen_phases: list[str] = []
     retry_state: dict[str, bool] = {"started": False}
     on_phase = _make_phase_callback(
-        quiet=args.quiet, narrative=narrative,
-        seen_phases=seen_phases, retry_state=retry_state,
+        quiet=args.quiet,
+        narrative=narrative,
+        seen_phases=seen_phases,
+        retry_state=retry_state,
     )
     on_skill = _make_skill_callback(narrative=narrative, quiet=args.quiet, spinner=spinner)
     on_qa = _make_qa_callback(narrative=narrative, quiet=args.quiet, spinner=spinner)
@@ -1436,9 +1616,14 @@ async def _run(args: argparse.Namespace) -> int:
 
     # Run the appropriate pipeline
     result = await _run_pipeline(
-        args, orchestrator, output_dir, on_phase,
-        on_skill=on_skill, on_qa=on_qa,
-        on_routed=on_routed, on_retry=on_retry,
+        args,
+        orchestrator,
+        output_dir,
+        on_phase,
+        on_skill=on_skill,
+        on_qa=on_qa,
+        on_routed=on_routed,
+        on_retry=on_retry,
     )
 
     # Stop spinner
@@ -1790,9 +1975,15 @@ async def _guided_resume_session(  # noqa: C901, PLR0911, PLR0912
             model = str(session.get("model", settings["model"]))
             fast_model = session.get("fast_model", settings["fast_model"])
             cmd = [
-                "uv", "run", "superagents-sdlc", "idea-to-code", idea,
-                "--brief", str(output_dir / "design_brief.md"),
-                "--output-dir", str(output_dir / "pipeline"),
+                "uv",
+                "run",
+                "superagents-sdlc",
+                "idea-to-code",
+                idea,
+                "--brief",
+                str(output_dir / "design_brief.md"),
+                "--output-dir",
+                str(output_dir / "pipeline"),
                 "--interactive",
             ]
             if (output_dir / "idea_memory.md").exists():
@@ -1863,9 +2054,15 @@ async def _guided_resume_session(  # noqa: C901, PLR0911, PLR0912
             model = str(session.get("model", settings["model"]))
             fast_model = session.get("fast_model", settings["fast_model"])
             cmd = [
-                "uv", "run", "superagents-sdlc", "idea-to-code", idea,
-                "--brief", str(output_dir / "design_brief.md"),
-                "--output-dir", str(output_dir / "pipeline"),
+                "uv",
+                "run",
+                "superagents-sdlc",
+                "idea-to-code",
+                idea,
+                "--brief",
+                str(output_dir / "design_brief.md"),
+                "--output-dir",
+                str(output_dir / "pipeline"),
                 "--interactive",
             ]
             if (output_dir / "idea_memory.md").exists():
