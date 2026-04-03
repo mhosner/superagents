@@ -23,6 +23,72 @@ if TYPE_CHECKING:
 AUTO_CONTINUE_MARGIN = 10
 
 
+def _render_progress_bar(confidence: int, threshold: int, width: int = 20) -> str:
+    """Render a normalized progress bar.
+
+    Normalizes the confidence score so that ``threshold`` appears as 100%.
+    The user never sees the raw score or threshold.
+
+    Args:
+        confidence: Current confidence score.
+        threshold: Target threshold (maps to 100% visually).
+        width: Bar width in characters.
+
+    Returns:
+        Formatted progress bar string like ``[████████────────────] 50%``.
+    """
+    ratio = 0.0 if threshold <= 0 else confidence / threshold
+    ratio = max(0.0, min(1.0, ratio))
+    filled = round(ratio * width)
+    empty = width - filled
+    bar = "█" * filled + "─" * empty
+    if ratio >= 1.0:
+        return f"[{bar}] Ready!"
+    pct = round(ratio * 100)
+    return f"[{bar}] {pct}%"
+
+
+def _confidence_drop_message(
+    delta: int, current_gaps: int, previous_gaps: int,
+) -> str:
+    """Generate a contextual message when confidence drops.
+
+    Args:
+        delta: Confidence change from previous assessment.
+        current_gaps: Number of gaps after this assessment.
+        previous_gaps: Number of gaps before this assessment.
+
+    Returns:
+        Reassuring one-liner, or empty string if delta >= 0.
+    """
+    if delta >= 0:
+        return ""
+    if current_gaps > previous_gaps:
+        return "↓ Your answer revealed new areas to explore — that's progress"
+    return "↓ Recalibrating based on your input"
+
+
+async def _prompt_with_help(prompt: str = "> ") -> str:
+    """Prompt for input, handling ``?`` help requests.
+
+    Intercepts ``?`` and prints a placeholder help message, then
+    re-prompts. Phase 3 will wire this up to real callout skills.
+    The ``?`` input is never returned to the caller.
+
+    Args:
+        prompt: Prompt string to display.
+
+    Returns:
+        The user's non-help input.
+    """
+    while True:
+        response = await _async_input(prompt)
+        if response.strip() == "?":
+            print("  Help options coming soon! For now, pick an answer or type your own.")  # noqa: T201
+            continue
+        return response
+
+
 class _SpinnerLLMClient:
     """LLMClient wrapper that shows a spinner during generate() calls.
 
