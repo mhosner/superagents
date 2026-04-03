@@ -1768,12 +1768,9 @@ async def _guided_flow() -> int:  # noqa: C901, PLR0912
     except Exception:  # noqa: BLE001
         version = "dev"
 
-    print(  # noqa: T201
-        f"\n╭─────────────────────────────────────────╮\n"
-        f"│  🚀 Superagents v{version:<24s}│\n"
-        f"│  AI-powered software design assistant   │\n"
-        f"╰─────────────────────────────────────────╯"
-    )
+    from superagents_sdlc.cli_spinner import print_banner  # noqa: PLC0415
+
+    print_banner(version)
 
     # Settings — session-scoped defaults
     settings: dict[str, str | None] = {
