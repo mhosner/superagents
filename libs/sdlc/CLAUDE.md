@@ -14,7 +14,7 @@ An agentic software development lifecycle framework that combines:
 - **OpenTelemetry** as the observability backbone from day one
 - **LangGraph** for HITL brainstorm subgraph with interrupt/resume
 
-475 tests, all passing. The goal: an adoption-gradient framework where enterprise teams can dial autonomy from "agents assist, humans decide" to "agents execute, humans approve at boundaries" — with every persona mapping to a real human role that owns the output.
+542 tests, all passing. The goal: an adoption-gradient framework where enterprise teams can dial autonomy from "agents assist, humans decide" to "agents execute, humans approve at boundaries" — with every persona mapping to a real human role that owns the output.
 
 ## Architecture overview
 
@@ -241,9 +241,13 @@ libs/sdlc/                           # SDLC integration package
 ├── pyproject.toml
 ├── src/superagents_sdlc/
 │   ├── brainstorm/                  # LangGraph brainstorm subgraph
-│   │   ├── state.py                 # BrainstormState TypedDict (13 fields)
-│   │   ├── nodes.py                 # Node factories (explore, question, coverage, approaches, design, synthesize)
+│   │   ├── state.py                 # BrainstormState TypedDict (24 fields)
+│   │   ├── nodes.py                 # Node factories (explore, question, confidence, approaches, design, synthesize)
+│   │   ├── confidence.py            # Two-pass confidence assessment with section readiness
 │   │   ├── prompts.py               # Prompt templates for brainstorm nodes
+│   │   ├── idea_memory.py           # IdeaMemory structured decision tracking
+│   │   ├── narrative.py             # Brainstorm narrative renderer
+│   │   ├── sidekick.py              # Callout skills (pros/cons, outside-the-box, consequences)
 │   │   └── graph.py                 # StateGraph assembly with interrupt/resume flow
 │   ├── personas/                    # SDLC persona facades
 │   │   ├── base.py                  # BasePersona ABC with telemetry, policy, transport
@@ -269,7 +273,9 @@ libs/sdlc/                           # SDLC integration package
 │   │   ├── orchestrator.py          # PipelineOrchestrator (run_idea_to_code, run_spec_from_prd, etc.)
 │   │   ├── result.py                # PipelineResult dataclass with retry tracking
 │   │   └── narrative.py             # NarrativeWriter (session narration to markdown)
-│   └── cli.py                       # Standalone CLI (superagents-sdlc command)
+│   ├── manifest.py                  # Session manifest (.superagents.json) for guided startup
+│   ├── cli.py                       # Standalone CLI (superagents-sdlc command)
+│   └── cli_spinner.py               # Terminal spinner + banner for brainstorm UX
 └── tests/
     ├── unit_tests/
     │   ├── test_skills/
@@ -278,6 +284,7 @@ libs/sdlc/                           # SDLC integration package
     │   ├── test_handoffs/
     │   ├── test_workflows/
     │   ├── test_brainstorm/
+    │   ├── test_manifest.py
     │   └── test_cli.py
     └── integration_tests/
 ```
@@ -299,7 +306,11 @@ anthropic = ["anthropic>=0.40.0", "python-dotenv>=1.0.0"]
 
 [project.scripts]
 superagents-sdlc = "superagents_sdlc.cli:main"
+superagents = "superagents_sdlc.cli:guided_main"
 ```
+
+Two entry points: `superagents-sdlc` for power-user flag-based CLI, `superagents` for
+guided interactive startup with session discovery.
 
 Telemetry lives in the superagents SDK package (`superagents.telemetry`), not as a
 separate package. `superagents_sdlc` imports from it:
@@ -310,6 +321,21 @@ from superagents.telemetry import persona_span, skill_span, handoff_span, approv
 
 The `anthropic` extra is optional — the CLI works with `--stub` without it. Install
 with `pip install superagents-sdlc[anthropic]` for real LLM calls.
+
+## Sidekick features
+
+The "Sidekick" feature set provides guided UX for the brainstorm:
+
+- **Session manifest** (`.superagents.json`) — tracks session state (brainstorming, brief_ready,
+  pipeline_complete, pipeline_needs_work) so the guided startup can discover and resume sessions.
+- **Guided startup** (`superagents` command) — zero-config entry point with session discovery
+  menu, state-aware resume, and settings. Constructs argparse Namespace from interactive input.
+- **Progress bar** — normalized to confidence threshold (user sees percentage, not raw score).
+  `--verbose` flag shows full section readiness and gap details.
+- **Callout skills** (`?` at any prompt) — sub-menu of thinking tools that make an LLM call
+  with current context and display the result. The graph never knows it happened. Three skills:
+  pros/cons, outside-the-box, unforeseen consequences. Adding a skill = one prompt template
+  and one entry in the `SKILLS` list in `brainstorm/sidekick.py`.
 
 ## Code standards
 
