@@ -311,6 +311,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Directory to write the design brief (optional).",
     )
+    brainstorm_parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        default=False,
+        help="Show detailed section readiness and gap information.",
+    )
 
     return parser
 
@@ -435,6 +441,7 @@ async def _handle_brainstorm_interrupt(
     payload: dict,
     *,
     quiet: bool = False,
+    verbose: bool = False,
     output_dir: Path | None = None,
 ) -> str:
     """Handle a brainstorm interrupt by prompting the user.
@@ -442,6 +449,7 @@ async def _handle_brainstorm_interrupt(
     Args:
         payload: Interrupt payload with type and data.
         quiet: If True, suppress output and return defaults.
+        verbose: If True, show detailed section readiness and gap info.
         output_dir: Directory to write artifacts to disk before approval.
             When provided, design sections and briefs are written to disk
             and only the file path is shown (not the full content).
@@ -458,28 +466,31 @@ async def _handle_brainstorm_interrupt(
         questions = payload.get("questions", [])
         if not quiet:
             confidence = payload.get("confidence", 0)
-            round_num = payload.get("round", 0)
-            print(  # noqa: T201
-                f"\nRound {round_num} | Confidence: {confidence}% | "
-                f"Threshold: 80%"
-            )
+            threshold = payload.get("threshold", 80)
+            print(f"\n{_render_progress_bar(confidence, threshold)}")  # noqa: T201
         answers = []
         for i, q in enumerate(questions, 1):
             if not quiet:
                 target = q.get("targets_section", "")
-                target_label = f" (targets: {target})" if target else ""
-                if len(questions) == 1:
-                    print(f"\nQuestion{target_label}:")  # noqa: T201
-                else:
-                    print(f"\nQuestion {i} of {len(questions)}{target_label}:")  # noqa: T201
-                print(f"  {q['question']}")  # noqa: T201
+                if verbose and target:
+                    print(f"  [targets: {target}]")  # noqa: T201
+                if len(questions) > 1:
+                    print(f"\n  Question {i} of {len(questions)}:")  # noqa: T201
+                print(f"\n  {q['question']}\n")  # noqa: T201
                 if q.get("options"):
                     from superagents_sdlc.brainstorm.nodes import _clean_option  # noqa: PLC0415
 
                     for j, opt in enumerate(q["options"], 1):
-                        print(f"    {j}. {_clean_option(opt)}")  # noqa: T201
-                print("  (type a number, your own answer, or 'q' to quit)")  # noqa: T201
-            response = await _async_input("> ")
+                        print(f"  {j}) {_clean_option(opt)}")  # noqa: T201
+                    print(  # noqa: T201
+                        f"  {len(q['options']) + 1}) Type your own answer"
+                    )
+                    print(  # noqa: T201
+                        "\n  Pick a number or type your answer   ?) Help   q) Quit"
+                    )
+                else:
+                    print("  Type your answer   ?) Help   q) Quit")  # noqa: T201
+            response = await _prompt_with_help()
             if response.strip().lower() in ("q", "quit"):
                 raise _BrainstormQuit
             # Return resolved answer + question metadata from the
@@ -508,9 +519,9 @@ async def _handle_brainstorm_interrupt(
                 from superagents_sdlc.brainstorm.nodes import _clean_option  # noqa: PLC0415
 
                 for i, opt in enumerate(payload["options"], 1):
-                    print(f"  {i}. {_clean_option(opt)}")  # noqa: T201
-            print("  (type 'q' to quit)")  # noqa: T201
-        response = await _async_input("> ")
+                    print(f"  {i}) {_clean_option(opt)}")  # noqa: T201
+            print("  Type your answer   ?) Help   q) Quit")  # noqa: T201
+        response = await _prompt_with_help()
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         return response
@@ -523,30 +534,63 @@ async def _handle_brainstorm_interrupt(
 
         # Auto-continue: skip prompt when far below threshold, but always
         # pause on round 1 so the user gets their first look.
-        gap = threshold - confidence
-        if gap > AUTO_CONTINUE_MARGIN and round_num > 1:
+        gap_to_threshold = threshold - confidence
+        if gap_to_threshold > AUTO_CONTINUE_MARGIN and round_num > 1:
             if not quiet:
+                bar = _render_progress_bar(confidence, threshold)
+                count = len(gaps)
+                label = "area" if count == 1 else "areas"
                 print(  # noqa: T201
-                    f"\n  Confidence {confidence}/{threshold}"
-                    f" — auto-continuing ({len(gaps)} gaps remaining)"
+                    f"\n  {bar}"
+                    f" — auto-continuing ({count} {label} remaining)"
                 )
             return "auto_continue"
 
         if not quiet:
-            print(f"\nConfidence Assessment: {confidence}% (threshold: {threshold}%)")  # noqa: T201
-            summaries = payload.get("summaries", {})
-            for section, info in payload.get("sections", {}).items():
-                readiness = info.get("readiness", "?")
-                summary = summaries.get(section, "")
-                markers = {"high": "✓", "medium": "~", "low": "✗"}
-                marker = markers.get(readiness, "?")
-                print(f"  {marker} {section}: {readiness.upper()} — {summary}")  # noqa: T201
-            if gaps:
-                print("\nGaps:")  # noqa: T201
-                for g in gaps:
-                    print(f"  - {g['section']}: {g['description']}")  # noqa: T201
-            print("\n  (c)ontinue / (d)efer sections / (o)verride / (q)uit")  # noqa: T201
-        response = await _async_input("> ")
+            print(f"\n{_render_progress_bar(confidence, threshold)}")  # noqa: T201
+            delta = payload.get("confidence_delta", 0)
+            previous_gaps = payload.get(
+                "previous_gap_count", len(gaps),
+            )
+            drop_msg = _confidence_drop_message(
+                delta, len(gaps), previous_gaps,
+            )
+            if drop_msg:
+                print(f"{drop_msg}")  # noqa: T201
+            count = len(gaps)
+            verb = "needs" if count == 1 else "need"
+            label = "area" if count == 1 else "areas"
+            print(f"\n  {count} {label} still {verb} input")  # noqa: T201
+
+            if verbose:
+                summaries = payload.get("summaries", {})
+                sections = payload.get("sections", {})
+                if sections:
+                    print("\n  Section readiness:")  # noqa: T201
+                    markers = {"high": "✓", "medium": "~", "low": "✗"}
+                    for section, info in sections.items():
+                        readiness = info.get("readiness", "?")
+                        marker = markers.get(readiness, "?")
+                        summary = summaries.get(section, "")
+                        print(  # noqa: T201
+                            f"    {marker} {section}:"
+                            f" {readiness.upper()} — {summary}"
+                        )
+                if gaps:
+                    print("\n  Gaps:")  # noqa: T201
+                    for g in gaps:
+                        print(  # noqa: T201
+                            f"    - {g['section']}: {g['description']}"
+                        )
+
+            if verbose:
+                print(  # noqa: T201
+                    "\n  c) Continue   d) Defer sections"
+                    "   o) Override   q) Quit   ?) Help"
+                )
+            else:
+                print("\n  c) Continue   q) Quit   ?) Help")  # noqa: T201
+        response = await _prompt_with_help()
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         choice = response.strip().lower()
@@ -557,7 +601,7 @@ async def _handle_brainstorm_interrupt(
         if choice.startswith("d"):
             if not quiet:
                 print("Defer which sections? (comma-separated):")  # noqa: T201
-            sections_input = await _async_input("> ")
+            sections_input = await _prompt_with_help()
             if sections_input.strip().lower() in ("q", "quit"):
                 raise _BrainstormQuit
             return f"defer {sections_input.strip()}"
@@ -565,32 +609,50 @@ async def _handle_brainstorm_interrupt(
 
     if interrupt_type == "approaches":
         if not quiet:
-            print("\nProposed approaches:")  # noqa: T201
-            for approach in payload["approaches"]:
-                print(f"\n  {approach['name']}: {approach['description']}")  # noqa: T201
-                print(f"    Tradeoffs: {approach['tradeoffs']}")  # noqa: T201
-            print("\n  (type 'q' to quit)")  # noqa: T201
-        response = await _async_input("Select approach by name> ")
+            print("\n  Choosing an approach\n")  # noqa: T201
+            for i, approach in enumerate(payload["approaches"], 1):
+                print(  # noqa: T201
+                    f"  {i}) {approach['name']}"
+                    f" — {approach['description']}"
+                )
+                print(  # noqa: T201
+                    f"     Tradeoffs: {approach['tradeoffs']}"
+                )
+            print("\n  Pick a number   ?) Help   q) Quit")  # noqa: T201
+        response = await _prompt_with_help()
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         return response
 
     if interrupt_type == "design_section":
         content = _extract_section_content(payload["content"])
+        section_index = payload.get("section_index", 0)
+        section_count = payload.get("section_count", 0)
+        step_label = ""
+        if section_count > 0:
+            step_label = f"section {section_index + 1} of {section_count} — "
         if output_dir is not None:
             sections_dir = output_dir / "sections"
             sections_dir.mkdir(parents=True, exist_ok=True)
             section_path = sections_dir / f"{_slugify(payload['title'])}.md"
             section_path.write_text(content)
             if not quiet:
-                print(f"\n--- {payload['title']} ---")  # noqa: T201
-                print(f"📄 {section_path}")  # noqa: T201
-                print("\n  approve (a) / edit (paste text) / quit (q)")  # noqa: T201
+                print(  # noqa: T201
+                    f"\n  Design: {step_label}{payload['title']}\n"
+                )
+                print(f"  \U0001f4c4 Saved to: {section_path}")  # noqa: T201
+                print(  # noqa: T201
+                    "\n  a) Approve   e) Edit   ?) Help   q) Quit"
+                )
         elif not quiet:
-            print(f"\n--- {payload['title']} ---")  # noqa: T201
+            print(  # noqa: T201
+                f"\n  Design: {step_label}{payload['title']}\n"
+            )
             print(content)  # noqa: T201
-            print("\n  approve (a) / edit (paste text) / quit (q)")  # noqa: T201
-        response = await _async_input("> ")
+            print(  # noqa: T201
+                "\n  a) Approve   e) Edit   ?) Help   q) Quit"
+            )
+        response = await _prompt_with_help()
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         if response.strip().lower() in ("a", "approve"):
@@ -606,14 +668,18 @@ async def _handle_brainstorm_interrupt(
             brief_path.parent.mkdir(parents=True, exist_ok=True)
             brief_path.write_text(payload["brief"])
             if not quiet:
-                print("\n--- Design Brief ---")  # noqa: T201
-                print(f"📄 {brief_path}")  # noqa: T201
-                print("\n  approve (a) / revise (type feedback) / quit (q)")  # noqa: T201
+                print("\n  Final review: design brief\n")  # noqa: T201
+                print(f"  \U0001f4c4 Saved to: {brief_path}")  # noqa: T201
+                print(  # noqa: T201
+                    "\n  a) Approve   e) Edit   ?) Help   q) Quit"
+                )
         elif not quiet:
-            print("\n--- Design Brief ---")  # noqa: T201
+            print("\n  Final review: design brief\n")  # noqa: T201
             print(payload["brief"])  # noqa: T201
-            print("\n  approve (a) / revise (type feedback) / quit (q)")  # noqa: T201
-        response = await _async_input("> ")
+            print(  # noqa: T201
+                "\n  a) Approve   e) Edit   ?) Help   q) Quit"
+            )
+        response = await _prompt_with_help()
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         return "approve" if response.strip().lower() in ("a", "approve") else response
@@ -621,13 +687,28 @@ async def _handle_brainstorm_interrupt(
     if interrupt_type == "stall_exit":
         if not quiet:
             confidence = payload.get("confidence", 0)
-            print(f"\nConfidence plateaued at {confidence}%.")  # noqa: T201
-            if payload.get("gaps"):
-                print("Remaining gaps:")  # noqa: T201
-                for gap in payload["gaps"]:
-                    print(f"  - {gap['section']}: {gap['description']}")  # noqa: T201
-            print("\n  (p)roceed to approaches / (c)ontinue questioning / (q)uit")  # noqa: T201
-        response = await _async_input("> ")
+            threshold = payload.get("threshold", 80)
+            gaps = payload.get("gaps", [])
+            print(f"\n{_render_progress_bar(confidence, threshold)}")  # noqa: T201
+            print(  # noqa: T201
+                "  Progress has stalled"
+                " — confidence hasn't changed in recent rounds"
+            )
+            count = len(gaps)
+            verb = "needs" if count == 1 else "need"
+            label = "area" if count == 1 else "areas"
+            print(f"\n  {count} {label} still {verb} input")  # noqa: T201
+            if verbose and gaps:
+                print("\n  Gaps:")  # noqa: T201
+                for g in gaps:
+                    print(  # noqa: T201
+                        f"    - {g['section']}: {g['description']}"
+                    )
+            print(  # noqa: T201
+                "\n  p) Move on to design   c) Keep exploring"
+                "   ?) Help   q) Quit"
+            )
+        response = await _prompt_with_help()
         if response.strip().lower() in ("q", "quit"):
             raise _BrainstormQuit
         choice = response.strip().lower()
@@ -636,7 +717,7 @@ async def _handle_brainstorm_interrupt(
         return "continue"
 
     # Unknown interrupt type — generic prompt
-    response = await _async_input(f"\n[{interrupt_type}]> ")
+    response = await _prompt_with_help()
     if response.strip().lower() in ("q", "quit"):
         raise _BrainstormQuit
     return response
@@ -760,6 +841,7 @@ async def _run_brainstorm(args: argparse.Namespace) -> int:
             response = await _handle_brainstorm_interrupt(
                 payload,
                 quiet=args.quiet,
+                verbose=getattr(args, "verbose", False),
                 output_dir=output_dir,
             )
             result = await graph.ainvoke(Command(resume=response), config)
@@ -1638,6 +1720,7 @@ async def _guided_new_brainstorm(settings: dict[str, str | None]) -> int:
         max_tokens=int(settings["max_tokens"] or "16384"),
         stub=False,
         quiet=False,
+        verbose=False,
         json=False,
         interactive=False,
     )
@@ -1687,6 +1770,7 @@ async def _guided_resume_session(  # noqa: C901, PLR0911, PLR0912
                 max_tokens=int(settings["max_tokens"] or "16384"),
                 stub=False,
                 quiet=False,
+                verbose=False,
                 json=False,
                 interactive=False,
             )
@@ -1740,6 +1824,7 @@ async def _guided_resume_session(  # noqa: C901, PLR0911, PLR0912
                 max_tokens=int(settings["max_tokens"] or "16384"),
                 stub=False,
                 quiet=False,
+                verbose=False,
                 json=False,
                 interactive=False,
             )

@@ -367,6 +367,7 @@ def _make_args(
     output_dir: str | None = None,
     codebase_context: str | None = None,
     quiet: bool = False,
+    verbose: bool = False,
     stub: bool = True,
     interactive: bool = False,
     model: str = "claude-sonnet-4-6",
@@ -380,6 +381,7 @@ def _make_args(
         output_dir=output_dir,
         codebase_context=codebase_context,
         quiet=quiet,
+        verbose=verbose,
         stub=stub,
         interactive=interactive,
         model=model,
@@ -643,8 +645,8 @@ async def test_auto_continue_when_far_below_threshold(capsys):
     mock_input.assert_not_called()
     captured = capsys.readouterr()
     assert "auto-continuing" in captured.out.lower()
-    assert "45" in captured.out
-    assert "80" in captured.out
+    assert "█" in captured.out
+    assert "1 area remaining" in captured.out
 
 
 async def test_no_auto_continue_on_round_1(capsys):
@@ -851,3 +853,224 @@ async def test_help_stub_multiple_times():
         result = await _prompt_with_help()
     assert result == "hello"
     assert mock_input.call_count == 3
+
+
+# -- Redesigned interrupt output tests --
+
+
+async def test_question_shows_progress_bar(capsys):
+    """Questions interrupt displays a progress bar instead of raw confidence."""
+    payload = {
+        "type": "questions",
+        "questions": [
+            {"question": "Who are the users?",
+             "options": ["developers", "PMs"],
+             "targets_section": "users_and_personas"},
+        ],
+        "round": 1,
+        "confidence": 40,
+        "threshold": 80,
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="1"):
+        await _handle_brainstorm_interrupt(payload, quiet=False)
+    captured = capsys.readouterr()
+    assert "█" in captured.out
+    assert "─" in captured.out
+    assert "Round" not in captured.out
+
+
+async def test_question_hides_target_section_by_default(capsys):
+    """Target section is hidden when verbose=False."""
+    payload = {
+        "type": "questions",
+        "questions": [
+            {"question": "Who are the users?",
+             "options": None,
+             "targets_section": "users_and_personas"},
+        ],
+        "round": 1,
+        "confidence": 40,
+        "threshold": 80,
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="devs"):
+        await _handle_brainstorm_interrupt(payload, quiet=False, verbose=False)
+    captured = capsys.readouterr()
+    assert "targets:" not in captured.out
+
+
+async def test_question_shows_target_section_verbose(capsys):
+    """Target section is shown when verbose=True."""
+    payload = {
+        "type": "questions",
+        "questions": [
+            {"question": "Who are the users?",
+             "options": None,
+             "targets_section": "users_and_personas"},
+        ],
+        "round": 1,
+        "confidence": 40,
+        "threshold": 80,
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="devs"):
+        await _handle_brainstorm_interrupt(payload, quiet=False, verbose=True)
+    captured = capsys.readouterr()
+    assert "[targets: users_and_personas]" in captured.out
+
+
+async def test_confidence_assessment_slim_output(capsys):
+    """Default confidence assessment shows progress bar and gap count, not sections."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 40,
+        "threshold": 80,
+        "round": 1,
+        "sections": {
+            "problem_statement": {"readiness": "high"},
+            "requirements": {"readiness": "medium"},
+        },
+        "summaries": {
+            "problem_statement": "Clear goals",
+            "requirements": "Basic features",
+        },
+        "gaps": [
+            {"section": "technical_constraints", "description": "No tech chosen"},
+        ],
+        "options": ["continue", "defer", "override"],
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="c"):
+        result = await _handle_brainstorm_interrupt(payload, quiet=False, verbose=False)
+    assert result == "continue"
+    captured = capsys.readouterr()
+    assert "█" in captured.out
+    assert "1 area still needs input" in captured.out
+    # Slim mode hides section readiness
+    assert "Section readiness:" not in captured.out
+    assert "c) Continue" in captured.out
+    assert "q) Quit" in captured.out
+
+
+async def test_confidence_assessment_verbose_output(capsys):
+    """Verbose confidence assessment shows section readiness and gaps."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 40,
+        "threshold": 80,
+        "round": 1,
+        "sections": {
+            "problem_statement": {"readiness": "high"},
+            "requirements": {"readiness": "medium"},
+            "technical_constraints": {"readiness": "low"},
+        },
+        "summaries": {
+            "problem_statement": "Clear goals",
+            "requirements": "Basic features",
+            "technical_constraints": "No tech chosen",
+        },
+        "gaps": [
+            {"section": "technical_constraints", "description": "No storage chosen"},
+        ],
+        "options": ["continue", "defer", "override"],
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="c"):
+        result = await _handle_brainstorm_interrupt(payload, quiet=False, verbose=True)
+    assert result == "continue"
+    captured = capsys.readouterr()
+    assert "Section readiness:" in captured.out
+    assert "✓ problem_statement:" in captured.out
+    assert "~ requirements:" in captured.out
+    assert "✗ technical_constraints:" in captured.out
+    assert "Gaps:" in captured.out
+    assert "No storage chosen" in captured.out
+    assert "d) Defer sections" in captured.out
+    assert "o) Override" in captured.out
+
+
+async def test_design_section_step_counter(capsys, tmp_path):
+    """Design section shows 1-based step counter from payload indices."""
+    payload = {
+        "type": "design_section",
+        "title": "Technical Constraints",
+        "content": "## Technical Constraints\nStub.",
+        "section_index": 2,
+        "section_count": 6,
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="a"):
+        result = await _handle_brainstorm_interrupt(
+            payload, quiet=False, output_dir=tmp_path,
+        )
+    assert result == "approve"
+    captured = capsys.readouterr()
+    assert "section 3 of 6" in captured.out
+    assert "Technical Constraints" in captured.out
+
+
+async def test_stall_exit_friendly_message(capsys):
+    """Stall exit shows progress bar and friendly stall message."""
+    payload = {
+        "type": "stall_exit",
+        "confidence": 65,
+        "threshold": 80,
+        "gaps": [
+            {"section": "acceptance_criteria", "description": "No error paths"},
+        ],
+        "options": ["proceed", "continue"],
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="p"):
+        result = await _handle_brainstorm_interrupt(payload, quiet=False)
+    assert result == "proceed"
+    captured = capsys.readouterr()
+    assert "█" in captured.out
+    assert "stalled" in captured.out.lower()
+    assert "1 area still needs input" in captured.out
+    assert "Move on to design" in captured.out
+
+
+async def test_defer_override_hidden_by_default(capsys):
+    """Defer and override options are hidden in slim (non-verbose) mode."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 50,
+        "threshold": 80,
+        "round": 1,
+        "sections": {},
+        "summaries": {},
+        "gaps": [{"section": "goals", "description": "Gap"}],
+        "options": ["continue", "defer", "override"],
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="c"):
+        await _handle_brainstorm_interrupt(payload, quiet=False, verbose=False)
+    captured = capsys.readouterr()
+    assert "d) Defer" not in captured.out
+    assert "o) Override" not in captured.out
+
+
+async def test_defer_override_visible_verbose(capsys):
+    """Defer and override options are shown in verbose mode."""
+    payload = {
+        "type": "confidence_assessment",
+        "confidence": 50,
+        "threshold": 80,
+        "round": 1,
+        "sections": {},
+        "summaries": {},
+        "gaps": [{"section": "goals", "description": "Gap"}],
+        "options": ["continue", "defer", "override"],
+    }
+    with patch("superagents_sdlc.cli._async_input", new_callable=AsyncMock, return_value="c"):
+        await _handle_brainstorm_interrupt(payload, quiet=False, verbose=True)
+    captured = capsys.readouterr()
+    assert "d) Defer sections" in captured.out
+    assert "o) Override" in captured.out
+
+
+def test_verbose_flag_parsed():
+    """--verbose flag is parsed on the brainstorm subcommand."""
+    parser = _build_parser()
+    args = parser.parse_args(["brainstorm", "Test idea", "--verbose", "--stub"])
+    assert args.verbose is True
+
+    args_short = parser.parse_args(["brainstorm", "Test idea", "-v", "--stub"])
+    assert args_short.verbose is True
+
+    args_default = parser.parse_args(["brainstorm", "Test idea", "--stub"])
+    assert args_default.verbose is False
